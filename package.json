@@ -1,0 +1,20 @@
+{
+  "name": "escuela-futbol",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma"
+    ]
+  },
+  "scripts": {
+    "dev:api": "pnpm --filter @escuela-futbol/api dev",
+    "dev:web": "pnpm --filter @escuela-futbol/web dev",
+    "build:api": "pnpm --filter @escuela-futbol/api build",
+    "build:web": "pnpm --filter @escuela-futbol/web build",
+    "test:api": "pnpm --filter @escuela-futbol/api test"
+  }
+}

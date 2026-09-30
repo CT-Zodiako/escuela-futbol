@@ -1,0 +1,11 @@
+# Local Pi runtime state
+.atl/
+
+node_modules/
+dist/
+build/
+.env
+.env.local
+apps/api/generated/
+*.log
+*.tsbuildinfo

@@ -1,0 +1,43 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id           String   @id @default(uuid())
+  email        String   @unique @map("correo")
+  passwordHash String   @map("contrasena_hash")
+  createdAt    DateTime @default(now()) @map("creado_en")
+
+  @@map("administradores")
+}
+
+model Student {
+  id              String    @id @default(uuid())
+  name            String    @map("nombre")
+  document        String?   @map("documento")
+  phone           String?   @map("telefono")
+  isActive        Boolean   @default(true) @map("activo")
+  activationMonth String    @map("mes_activacion")
+  createdAt       DateTime  @default(now()) @map("creado_en")
+  payments        Payment[]
+
+  @@map("estudiantes")
+}
+
+model Payment {
+  id          String   @id @default(uuid())
+  studentId   String   @map("estudiante_id")
+  student     Student  @relation(fields: [studentId], references: [id])
+  paymentDate DateTime @map("fecha_pago")
+  amount      Int      @map("monto")
+  method      String   @default("cash") @map("metodo")
+  note        String?  @map("observacion")
+  createdAt   DateTime @default(now()) @map("creado_en")
+
+  @@map("pagos")
+}
