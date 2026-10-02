@@ -16,6 +16,8 @@ Create a lightweight macOS desktop shell for Escuela Futbol using Tauri while pr
 - [x] Remember the administrator email locally and enable the browser/macOS password manager without storing a plaintext password.
 - [x] Restyle the receipt as the Club Deportivo Napoli F.C. `COMPROBANTE DE INGRESO` form with letter-sized print layout (web only; no API/database changes).
 - [x] Add a required, manually entered receipt number that is immutable after payment creation.
+- [x] Add WhatsApp share button in ReceiptModal: generates/downloads a PDF (html2canvas-pro + jsPDF) and opens WhatsApp with a prefilled Spanish message (wa.me with 57 prefix for 10-digit phones); the user attaches the PDF manually. No API/database changes.
+- [x] Harden WhatsApp sharing for the packaged Tauri app: save the PDF to Downloads with `tauri-plugin-fs`, open WhatsApp with `tauri-plugin-opener`, least-privilege `capabilities/default.json`, and a shared guard against concurrent share/download.
 
 ## Acceptance criteria
 - Existing web build remains unchanged and succeeds.

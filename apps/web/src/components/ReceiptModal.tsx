@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Button, Group, Modal, Stack } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import type { Payment, Student } from "../api/client";
-import { IconDownload, IconPrinter } from "@tabler/icons-react";
+import { IconBrandWhatsapp, IconDownload, IconPrinter } from "@tabler/icons-react";
 
 function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("es-CO")}`;
@@ -73,6 +73,13 @@ export function amountToSpanishWords(amount: number): string {
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
+function toWhatsAppPhone(phone: string | null | undefined): string | null {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  if (digits.length === 10) return `57${digits}`;
+  if (digits.length >= 11) return digits;
+  return null;
+}
+
 function methodLabel(method: string): string {
   return method === "cash" ? "Efectivo" : method;
 }
@@ -86,6 +93,9 @@ interface ReceiptModalProps {
 export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const busyRef = useRef(false);
+  const isBusy = isDownloading || isSharing;
 
   async function handlePrint() {
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -101,7 +111,8 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
   }
 
   async function handleDownloadImage() {
-    if (!receiptRef.current) return;
+    if (!receiptRef.current || busyRef.current) return;
+    busyRef.current = true;
     setIsDownloading(true);
     try {
       const { default: html2canvas } = await import("html2canvas-pro");
@@ -125,7 +136,77 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
         withCloseButton: true,
       });
     } finally {
+      busyRef.current = false;
       setIsDownloading(false);
+    }
+  }
+
+  async function handleShareWhatsApp() {
+    if (!receiptRef.current || !student || !payment || busyRef.current) return;
+    busyRef.current = true;
+    setIsSharing(true);
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import("html2canvas-pro"),
+        import("jspdf"),
+      ]);
+      const canvas = await html2canvas(receiptRef.current, { backgroundColor: "#ffffff", scale: 2 });
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+      const margin = 10;
+      const width = pdf.internal.pageSize.getWidth() - margin * 2;
+      const height = (canvas.height * width) / canvas.width;
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, margin, width, height);
+      const fileName = `recibo-${student.name.replace(/\s+/g, "-").toLowerCase()}-${payment.id.slice(0, 8)}.pdf`;
+      const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+      if (isTauri) {
+        const { writeFile, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+        await writeFile(fileName, new Uint8Array(pdf.output("arraybuffer")), {
+          baseDir: BaseDirectory.Download,
+        });
+      } else {
+        pdf.save(fileName);
+      }
+
+      const message =
+        `Hola, te comparto el recibo de pago de ${student.name} por ${formatCurrency(payment.amount)} COP ` +
+        `(Nº ${payment.receiptNumber ?? payment.id.slice(0, 8).toUpperCase()}). ` +
+        `Adjunto el PDF del recibo a este chat.`;
+      const phone = toWhatsAppPhone(student.phone);
+      const url = phone
+        ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+        : `https://wa.me/?text=${encodeURIComponent(message)}`;
+      let opened = false;
+      if (isTauri) {
+        try {
+          const { openUrl } = await import("@tauri-apps/plugin-opener");
+          await openUrl(url);
+          opened = true;
+        } catch {
+          opened = false;
+        }
+      } else {
+        opened = window.open(url, "_blank", "noopener,noreferrer") !== null;
+      }
+      notifications.show({
+        color: opened ? "green" : "yellow",
+        title: isTauri ? "PDF guardado en Descargas" : "PDF descargado",
+        message: opened
+          ? "Se abrió WhatsApp con el mensaje. Adjuntá manualmente el PDF descargado antes de enviar."
+          : "No se pudo abrir WhatsApp automáticamente. Abrilo manualmente y adjuntá el PDF descargado.",
+        autoClose: 7000,
+        withCloseButton: true,
+      });
+    } catch {
+      notifications.show({
+        color: "red",
+        title: "No se pudo generar el PDF",
+        message: "Ocurrió un error inesperado. Intentá de nuevo.",
+        autoClose: 5000,
+        withCloseButton: true,
+      });
+    } finally {
+      busyRef.current = false;
+      setIsSharing(false);
     }
   }
 
@@ -211,11 +292,20 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
           </div>
 
           <Group grow>
-            <Button variant="default" leftSection={<IconPrinter size={18} />} onClick={handlePrint}>
+            <Button variant="default" leftSection={<IconPrinter size={18} />} onClick={handlePrint} disabled={isBusy}>
               Imprimir
             </Button>
-            <Button leftSection={<IconDownload size={18} />} onClick={handleDownloadImage} loading={isDownloading}>
+            <Button leftSection={<IconDownload size={18} />} onClick={handleDownloadImage} loading={isDownloading} disabled={isSharing}>
               Descargar imagen
+            </Button>
+            <Button
+              color="green"
+              leftSection={<IconBrandWhatsapp size={18} />}
+              onClick={handleShareWhatsApp}
+              loading={isSharing}
+              disabled={isDownloading}
+            >
+              Enviar por WhatsApp
             </Button>
           </Group>
         </Stack>
