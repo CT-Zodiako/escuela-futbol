@@ -155,7 +155,7 @@ body::before {
 @media print {
   @page {
     size: letter portrait;
-    margin: 15mm;
+    margin: 8mm;
   }
 
   html,
@@ -197,9 +197,10 @@ body::before {
   .receipt-print-area {
     position: static !important;
     display: block !important;
-    width: 180mm !important;
-    max-width: 180mm !important;
-    height: auto !important;
+    width: 195mm !important;
+    max-width: 195mm !important;
+    height: 130mm !important;
+    max-height: 130mm !important;
     margin: 0 !important;
     transform: none !important;
     break-inside: avoid;
@@ -207,7 +208,55 @@ body::before {
   }
 
   .receipt-sheet {
+    font-size: 8px;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+
+  .receipt-logo {
+    max-height: 52px;
+  }
+
+  .receipt-club-name {
+    font-size: 10px;
+    padding: 3px 4px 1px;
+  }
+
+  .receipt-club-line,
+  .receipt-club-split {
+    font-size: 8px;
+  }
+
+  .receipt-club-line {
+    padding: 2px;
+  }
+
+  .receipt-club-split span {
+    padding: 3px;
+  }
+
+  .receipt-rule {
+    border-top-width: 2px;
+  }
+
+  .receipt-cell {
+    min-height: 22px;
+    padding: 4px 6px;
+  }
+
+  .receipt-quarter {
+    min-height: 28px;
+  }
+
+  .receipt-number {
+    font-size: 12px;
+  }
+
+  .receipt-tall {
+    min-height: 20px;
+  }
+
+  .receipt-footer-row .receipt-cell {
+    min-height: 35px;
   }
 }
