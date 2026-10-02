@@ -34,6 +34,7 @@ model Payment {
   studentId   String   @map("estudiante_id")
   student     Student  @relation(fields: [studentId], references: [id])
   paymentDate DateTime @map("fecha_pago")
+  receiptNumber Int?   @unique @map("numero_comprobante")
   amount      Int      @map("monto")
   method      String   @default("cash") @map("metodo")
   note        String?  @map("observacion")

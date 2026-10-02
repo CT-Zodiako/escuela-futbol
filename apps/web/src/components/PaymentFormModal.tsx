@@ -4,6 +4,7 @@ import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Payment, type Student } from "../api/client";
 import { parseDateOnly, toDateOnlyString } from "../date";
+import { IconDeviceFloppy } from "@tabler/icons-react";
 
 interface PaymentFormModalProps {
   opened: boolean;
@@ -24,6 +25,7 @@ export function PaymentFormModal({
 }: PaymentFormModalProps) {
   const isEditing = Boolean(payment);
   const [paymentDate, setPaymentDate] = useState<Date | null>(new Date());
+  const [receiptNumber, setReceiptNumber] = useState<number | "">("");
   const [amount, setAmount] = useState<number | "">("");
   const [method, setMethod] = useState("cash");
   const [note, setNote] = useState("");
@@ -39,6 +41,7 @@ export function PaymentFormModal({
       setNote(payment.note ?? "");
     } else {
       setPaymentDate(new Date());
+      setReceiptNumber("");
       setAmount("");
       setMethod("cash");
       setNote("");
@@ -49,7 +52,7 @@ export function PaymentFormModal({
   function handleClose() {
     const hasChanges = isEditing
       ? amount !== payment?.amount || note.trim() !== (payment?.note ?? "")
-      : amount !== "" || note.trim() !== "";
+      : receiptNumber !== "" || amount !== "" || note.trim() !== "";
     if (hasChanges) {
       const confirmed = window.confirm("¿Descartar los datos ingresados?");
       if (!confirmed) return;
@@ -61,6 +64,11 @@ export function PaymentFormModal({
     event.preventDefault();
     if (!paymentDate) return;
     if (!isEditing && !student) return;
+
+    if (!isEditing && (receiptNumber === "" || receiptNumber <= 0)) {
+      setError("El número de comprobante es obligatorio.");
+      return;
+    }
 
     if (amount === "" || amount <= 0) {
       setError("No puede ingresar un valor negativo.");
@@ -88,6 +96,7 @@ export function PaymentFormModal({
       } else if (student) {
         const created = await api.createPayment({
           studentId: student.id,
+          receiptNumber: receiptNumber as number,
           paymentDate: toDateOnlyString(paymentDate),
           amount,
           method,
@@ -138,6 +147,19 @@ export function PaymentFormModal({
             withAsterisk
             popoverProps={{ withinPortal: true }}
           />
+          {!isEditing ? (
+            <NumberInput
+              label="Número de comprobante"
+              placeholder="1116"
+              withAsterisk
+              min={1}
+              allowNegative={false}
+              allowDecimal={false}
+              inputMode="numeric"
+              value={receiptNumber}
+              onChange={(value) => setReceiptNumber(typeof value === "number" ? value : "")}
+            />
+          ) : null}
           <NumberInput
             label="Valor recibido (COP)"
             placeholder="50000"
@@ -166,7 +188,7 @@ export function PaymentFormModal({
             autosize
             minRows={2}
           />
-          <Button type="submit" loading={isSubmitting}>
+          <Button type="submit" leftSection={<IconDeviceFloppy size={18} />} loading={isSubmitting}>
             Guardar
           </Button>
         </Stack>

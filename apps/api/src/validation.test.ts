@@ -30,9 +30,17 @@ describe("createStudentSchema", () => {
 describe("createPaymentSchema", () => {
   const base = {
     studentId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+    receiptNumber: 1116,
     paymentDate: "2026-09-05",
     method: "cash",
   };
+
+  it("requires a positive integer receipt number", () => {
+    const { receiptNumber: _omit, ...without } = base;
+    expect(createPaymentSchema.safeParse({ ...without, amount: 50000 }).success).toBe(false);
+    expect(createPaymentSchema.safeParse({ ...base, receiptNumber: 0, amount: 50000 }).success).toBe(false);
+    expect(createPaymentSchema.safeParse({ ...base, receiptNumber: 1.5, amount: 50000 }).success).toBe(false);
+  });
 
   it("accepts a valid positive integer amount", () => {
     const result = createPaymentSchema.safeParse({ ...base, amount: 50000 });
@@ -70,6 +78,15 @@ describe("createPaymentSchema", () => {
 });
 
 describe("updatePaymentSchema", () => {
+  it("does not carry a receipt number through", () => {
+    const result = updatePaymentSchema.safeParse({
+      paymentDate: "2026-09-05",
+      amount: 1000,
+      receiptNumber: 5,
+    });
+    expect(result.success && "receiptNumber" in result.data).toBe(false);
+  });
+
   const base = {
     paymentDate: "2026-09-05",
     method: "cash",

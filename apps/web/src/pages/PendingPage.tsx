@@ -3,6 +3,7 @@ import { Badge, Button, Group, Stack, Table, Text, Title } from "@mantine/core";
 import { MonthPickerInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type PendingReport, type Student } from "../api/client";
+import { IconArrowLeft, IconHistory, IconSearch } from "@tabler/icons-react";
 
 function currentMonthDate(): Date {
   const now = new Date();
@@ -51,7 +52,7 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
     <Stack p="xl" gap="xl">
       <Group justify="space-between">
         <Title order={2}>Pagos pendientes</Title>
-        <Button variant="subtle" onClick={onBack}>
+        <Button variant="default" leftSection={<IconArrowLeft size={18} />} onClick={onBack}>
           Volver
         </Button>
       </Group>
@@ -64,7 +65,7 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
           onChange={setMonth}
           popoverProps={{ withinPortal: true }}
         />
-        <Button onClick={loadReport} loading={isLoading}>
+        <Button leftSection={<IconSearch size={18} />} onClick={loadReport} loading={isLoading}>
           Consultar
         </Button>
       </Group>
@@ -105,6 +106,7 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
                     <Button
                       size="xs"
                       variant="default"
+                      leftSection={<IconHistory size={14} />}
                       onClick={() => {
                         const full = findStudent(student.studentId);
                         if (full) onOpenHistory(full);

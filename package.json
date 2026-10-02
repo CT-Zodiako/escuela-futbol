@@ -13,6 +13,8 @@
   "scripts": {
     "dev:api": "pnpm --filter @escuela-futbol/api dev",
     "dev:web": "pnpm --filter @escuela-futbol/web dev",
+    "dev:desktop": "pnpm --filter @escuela-futbol/desktop dev",
+    "build:desktop": "pnpm --filter @escuela-futbol/desktop build",
     "build:api": "pnpm --filter @escuela-futbol/api build",
     "build:web": "pnpm --filter @escuela-futbol/web build",
     "test:api": "pnpm --filter @escuela-futbol/api test"

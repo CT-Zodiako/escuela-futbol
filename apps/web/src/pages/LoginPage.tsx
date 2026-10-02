@@ -3,10 +3,13 @@ import { Button, Paper, PasswordInput, Stack, Text, TextInput, Title } from "@ma
 import { notifications } from "@mantine/notifications";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { IconLogin } from "@tabler/icons-react";
 
 export function LoginPage() {
   const { signIn } = useAuth();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(
+    () => localStorage.getItem("escuela-futbol-email") ?? "",
+  );
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -15,6 +18,7 @@ export function LoginPage() {
     setIsSubmitting(true);
     try {
       const { token } = await api.login(email, password);
+      localStorage.setItem("escuela-futbol-email", email);
       signIn(token);
     } catch (error) {
       notifications.show({
@@ -44,16 +48,18 @@ export function LoginPage() {
               label="Correo"
               placeholder="admin@escuelafutbol.local"
               required
+              autoComplete="username"
               value={email}
               onChange={(event) => setEmail(event.currentTarget.value)}
             />
             <PasswordInput
               label="Contraseña"
               required
+              autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.currentTarget.value)}
             />
-            <Button type="submit" fullWidth loading={isSubmitting}>
+            <Button type="submit" fullWidth leftSection={<IconLogin size={18} />} loading={isSubmitting}>
               Ingresar
             </Button>
           </Stack>

@@ -70,6 +70,7 @@ export interface PendingReport {
 export interface Payment {
   id: string;
   studentId: string;
+  receiptNumber: number | null;
   paymentDate: string;
   amount: number;
   method: string;
@@ -114,6 +115,7 @@ export const api = {
     }),
   createPayment: (data: {
     studentId: string;
+    receiptNumber: number;
     paymentDate: string;
     amount: number;
     method: string;

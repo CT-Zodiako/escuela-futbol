@@ -30,9 +30,17 @@ export async function paymentRoutes(app: FastifyInstance) {
       return reply.status(404).send({ message: "Estudiante no encontrado." });
     }
 
+    const duplicate = await prisma.payment.findUnique({
+      where: { receiptNumber: parsed.data.receiptNumber },
+    });
+    if (duplicate) {
+      return reply.status(409).send({ message: "El número de comprobante ya existe." });
+    }
+
     const payment = await prisma.payment.create({
       data: {
         studentId: parsed.data.studentId,
+        receiptNumber: parsed.data.receiptNumber,
         paymentDate: new Date(parsed.data.paymentDate),
         amount: parsed.data.amount,
         method: parsed.data.method,

@@ -26,6 +26,10 @@ export const dateRangeSchema = z
 
 export const createPaymentSchema = z.object({
   studentId: z.string().uuid("Estudiante inválido."),
+  receiptNumber: z
+    .number({ invalid_type_error: "El número de comprobante es obligatorio." })
+    .int("El número de comprobante debe ser un número entero.")
+    .positive("El número de comprobante debe ser mayor a cero."),
   paymentDate: z.string().min(1, "La fecha de pago es obligatoria."),
   amount: z
     .number()

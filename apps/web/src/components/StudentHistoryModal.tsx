@@ -4,6 +4,7 @@ import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Payment, type Student } from "../api/client";
 import { PaymentFormModal } from "./PaymentFormModal";
 import { ReceiptModal } from "./ReceiptModal";
+import { IconPencil, IconReceipt } from "@tabler/icons-react";
 
 function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("es-CO")}`;
@@ -91,6 +92,7 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
                         <Button
                           size="xs"
                           variant="default"
+                          leftSection={<IconPencil size={14} />}
                           onClick={() => setEditingPayment(payment)}
                         >
                           Editar
@@ -98,6 +100,7 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
                         <Button
                           size="xs"
                           variant="light"
+                          leftSection={<IconReceipt size={14} />}
                           onClick={() => setReceiptPayment(payment)}
                         >
                           Generar recibo

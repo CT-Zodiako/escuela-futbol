@@ -9,3 +9,7 @@ build/
 apps/api/generated/
 *.log
 *.tsbuildinfo
+.DS_Store
+.codegraph/
+apps/desktop/node_modules/
+apps/desktop/src-tauri/target/

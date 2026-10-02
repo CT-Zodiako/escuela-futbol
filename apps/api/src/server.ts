@@ -10,7 +10,9 @@ import { reportRoutes } from "./routes/reports.js";
 export function buildServer() {
   const app = Fastify({ logger: true });
 
-  app.register(cors, { origin: env.webOrigin });
+  app.register(cors, {
+    origin: [env.webOrigin, "tauri://localhost", "http://tauri.localhost"],
+  });
   app.register(jwt, { secret: env.jwtSecret });
 
   app.register(authRoutes);

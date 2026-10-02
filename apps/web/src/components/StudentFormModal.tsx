@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Modal, Stack, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Student } from "../api/client";
+import { IconDeviceFloppy } from "@tabler/icons-react";
 
 function currentMonth(): string {
   const now = new Date();
@@ -103,7 +104,7 @@ export function StudentFormModal({ opened, onClose, onCreated }: StudentFormModa
             value={phone}
             onChange={(event) => setPhone(event.currentTarget.value)}
           />
-          <Button type="submit" loading={isSubmitting}>
+          <Button type="submit" leftSection={<IconDeviceFloppy size={18} />} loading={isSubmitting}>
             Guardar
           </Button>
         </Stack>

@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { Button, Divider, Group, Modal, Stack, Text, Title } from "@mantine/core";
+import { Button, Group, Modal, Stack } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import type { Payment, Student } from "../api/client";
+import { IconDownload, IconPrinter } from "@tabler/icons-react";
 
 function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("es-CO")}`;
@@ -15,6 +16,65 @@ function formatDate(iso: string): string {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+const UNITS = [
+  "cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez",
+  "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve",
+  "veinte", "veintiuno", "veintidós", "veintitrés", "veinticuatro", "veinticinco", "veintiséis",
+  "veintisiete", "veintiocho", "veintinueve",
+];
+const TENS = ["", "", "", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"];
+const HUNDREDS = [
+  "", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos",
+  "seiscientos", "setecientos", "ochocientos", "novecientos",
+];
+
+function wordsBelowThousand(n: number): string {
+  if (n === 100) return "cien";
+  const parts: string[] = [];
+  const hundreds = Math.floor(n / 100);
+  const rest = n % 100;
+  if (hundreds > 0) parts.push(HUNDREDS[hundreds]);
+  if (rest > 0) {
+    if (rest < 30) {
+      parts.push(UNITS[rest]);
+    } else {
+      const unit = rest % 10;
+      parts.push(unit === 0 ? TENS[Math.floor(rest / 10)] : `${TENS[Math.floor(rest / 10)]} y ${UNITS[unit]}`);
+    }
+  }
+  return parts.join(" ");
+}
+
+function wordsBelowMillion(n: number): string {
+  const thousands = Math.floor(n / 1000);
+  const rest = n % 1000;
+  const parts: string[] = [];
+  if (thousands === 1) parts.push("mil");
+  else if (thousands > 1) parts.push(`${wordsBelowThousand(thousands)} mil`);
+  if (rest > 0) parts.push(wordsBelowThousand(rest));
+  return parts.join(" ");
+}
+
+export function amountToSpanishWords(amount: number): string {
+  const value = Math.floor(Math.abs(amount));
+  if (value === 0) return "Cero pesos";
+  const millions = Math.floor(value / 1_000_000);
+  const rest = value % 1_000_000;
+  const parts: string[] = [];
+  if (millions === 1) parts.push("un millón");
+  else if (millions > 1) parts.push(`${wordsBelowMillion(millions)} millones`);
+  if (rest > 0) parts.push(wordsBelowMillion(rest));
+  const text = parts.join(" ").replace(/veintiuno (mil|millones)/g, "veintiún $1")
+    .replace(/uno (mil|millones)/g, "un $1");
+  const suffix = rest === 0 ? "de pesos" : "pesos";
+  const sentence = `${text} ${suffix}`;
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+}
+
+function methodLabel(method: string): string {
+  return method === "cash" ? "Efectivo" : method;
 }
 
 interface ReceiptModalProps {
@@ -61,58 +121,80 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
   }
 
   return (
-    <Modal opened={payment !== null} onClose={onClose} title="Recibo" centered>
+    <Modal opened={payment !== null} onClose={onClose} title="Recibo" centered size="xl">
       {student && payment ? (
         <Stack gap="lg">
           <div ref={receiptRef} className="receipt-print-area">
-            <Stack gap="md" p="lg" style={{ border: "1px solid #E2E8F0", borderRadius: 8 }}>
-              <Title order={3}>Escuela Futbol</Title>
-              <Text size="sm" c="dimmed">
-                Recibo de pago
-              </Text>
-              <Divider />
-              <Group justify="space-between">
-                <Text size="sm" c="dimmed">
-                  Estudiante
-                </Text>
-                <Text fw={600}>{student.name}</Text>
-              </Group>
-              <Group justify="space-between">
-                <Text size="sm" c="dimmed">
-                  Fecha de pago
-                </Text>
-                <Text>{formatDate(payment.paymentDate)}</Text>
-              </Group>
-              <Group justify="space-between">
-                <Text size="sm" c="dimmed">
-                  Valor
-                </Text>
-                <Text fw={700} size="lg">
-                  {formatCurrency(payment.amount)}
-                </Text>
-              </Group>
-              <Group justify="space-between">
-                <Text size="sm" c="dimmed">
-                  Método de pago
-                </Text>
-                <Text>{payment.method === "cash" ? "Efectivo" : payment.method}</Text>
-              </Group>
-              {payment.note ? (
-                <Group justify="space-between" align="flex-start">
-                  <Text size="sm" c="dimmed">
-                    Observación
-                  </Text>
-                  <Text ta="right">{payment.note}</Text>
-                </Group>
-              ) : null}
-            </Stack>
+            <div className="receipt-sheet">
+              <div className="receipt-header">
+                <div className="receipt-logo-cell">
+                  <img src="/logo.png" alt="Club Deportivo Napoli F.C." className="receipt-logo" />
+                </div>
+                <div className="receipt-club-cell">
+                  <div className="receipt-club-name">CLUB DEPORTIVO NAPOLI F.C.</div>
+                  <div className="receipt-club-line receipt-bold">NIT. 901.170.843-9</div>
+                  <div className="receipt-club-line">Personería Jurídica # 041 DE MARZO 21 DE 2018</div>
+                  <div className="receipt-club-line">Resolución SDR # 4162.0.21.027</div>
+                  <div className="receipt-club-line">Resolución LVF # 023-09</div>
+                  <div className="receipt-club-split">
+                    <span>Tel./Cel.:</span>
+                    <span>Santiago de Cali - Colombia 2009</span>
+                  </div>
+                </div>
+              </div>
+              <div className="receipt-rule" />
+              <div className="receipt-row">
+                <div className="receipt-cell receipt-grow">Ciudad: Santiago de Cali</div>
+                <div className="receipt-cell receipt-grow receipt-title-cell">
+                  <span>COMPROBANTE DE INGRESO</span>
+                  <span className="receipt-number">Nº {payment.receiptNumber ?? payment.id.slice(0, 8).toUpperCase()}</span>
+                </div>
+              </div>
+              <div className="receipt-row">
+                <div className="receipt-cell receipt-grow">Fecha: {formatDate(payment.paymentDate)}</div>
+                <div className="receipt-cell receipt-grow receipt-bold">Valor: {formatCurrency(payment.amount)} COP</div>
+              </div>
+              <div className="receipt-row">
+                <div className="receipt-cell receipt-grow">
+                  Recibido de: <span className="receipt-bold">{student.name}</span>
+                </div>
+              </div>
+              <div className="receipt-row">
+                <div className="receipt-cell receipt-grow">
+                  Por concepto de: Mensualidad escuela de fútbol
+                </div>
+              </div>
+              <div className="receipt-row receipt-tall">
+                <div className="receipt-cell receipt-grow">{payment.note ?? ""}</div>
+              </div>
+              <div className="receipt-row">
+                <div className="receipt-cell receipt-grow">
+                  Suma en letras: <span className="receipt-bold">{amountToSpanishWords(payment.amount)}</span>
+                </div>
+              </div>
+              <div className="receipt-row">
+                <div className="receipt-cell receipt-quarter">Cheque No.</div>
+                <div className="receipt-cell receipt-quarter">Banco</div>
+                <div className="receipt-cell receipt-quarter">
+                  Efectivo {payment.method === "cash" ? "(X)" : ""}
+                  {payment.method !== "cash" ? <div>{methodLabel(payment.method)}</div> : null}
+                </div>
+                <div className="receipt-cell receipt-quarter">Firma y Sello</div>
+              </div>
+              <div className="receipt-row receipt-footer-row">
+                <div className="receipt-cell receipt-quarter">Elaborado</div>
+                <div className="receipt-cell receipt-quarter">Aprobado</div>
+                <div className="receipt-cell receipt-quarter">Contabilizado</div>
+                <div className="receipt-cell receipt-quarter">CC o Nit. {student.document ?? ""}</div>
+              </div>
+            </div>
           </div>
 
           <Group grow>
-            <Button variant="default" onClick={handlePrint}>
+            <Button variant="default" leftSection={<IconPrinter size={18} />} onClick={handlePrint}>
               Imprimir
             </Button>
-            <Button onClick={handleDownloadImage} loading={isDownloading}>
+            <Button leftSection={<IconDownload size={18} />} onClick={handleDownloadImage} loading={isDownloading}>
               Descargar imagen
             </Button>
           </Group>

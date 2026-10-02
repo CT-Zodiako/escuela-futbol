@@ -15,7 +15,18 @@ import {
 } from "@mantine/core";
 import { useElementSize, useMediaQuery } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconDotsVertical, IconSearch } from "@tabler/icons-react";
+import {
+  IconChartBar,
+  IconClockExclamation,
+  IconDotsVertical,
+  IconHistory,
+  IconLogout,
+  IconSearch,
+  IconUserCheck,
+  IconUserOff,
+  IconUserPlus,
+  IconCash,
+} from "@tabler/icons-react";
 import { api, ApiError, type Student } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { StudentFormModal } from "../components/StudentFormModal";
@@ -36,7 +47,9 @@ export function DashboardPage() {
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [paymentStudent, setPaymentStudent] = useState<Student | null>(null);
   const [historyStudent, setHistoryStudent] = useState<Student | null>(null);
-  const [view, setView] = useState<"students" | "reports" | "pending">("students");
+  const [view, setView] = useState<"students" | "reports" | "pending">(
+    "students",
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
   const { ref: listAreaRef, height: listAreaHeight } = useElementSize();
@@ -52,8 +65,16 @@ export function DashboardPage() {
 
   const rowsPerPage = isNarrowScreen
     ? Math.max(1, Math.floor(listAreaHeight / MOBILE_CARD_HEIGHT))
-    : Math.max(1, Math.floor((listAreaHeight - DESKTOP_HEADER_HEIGHT) / DESKTOP_ROW_HEIGHT));
-  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / rowsPerPage));
+    : Math.max(
+        1,
+        Math.floor(
+          (listAreaHeight - DESKTOP_HEADER_HEIGHT) / DESKTOP_ROW_HEIGHT,
+        ),
+      );
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredStudents.length / rowsPerPage),
+  );
   const currentPage = Math.min(page, totalPages);
   const paginatedStudents = filteredStudents.slice(
     (currentPage - 1) * rowsPerPage,
@@ -78,7 +99,9 @@ export function DashboardPage() {
         color: "red",
         title: "No se pudo cargar la lista",
         message:
-          error instanceof ApiError ? error.message : "Ocurrió un error inesperado.",
+          error instanceof ApiError
+            ? error.message
+            : "Ocurrió un error inesperado.",
         autoClose: 5000,
         withCloseButton: true,
       });
@@ -96,10 +119,14 @@ export function DashboardPage() {
     }
     try {
       const updated = await api.setStudentStatus(student.id, !student.isActive);
-      setStudents((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setStudents((prev) =>
+        prev.map((s) => (s.id === updated.id ? updated : s)),
+      );
       notifications.show({
         color: "green",
-        title: updated.isActive ? "Estudiante activado" : "Estudiante desactivado",
+        title: updated.isActive
+          ? "Estudiante activado"
+          : "Estudiante desactivado",
         message: `${updated.name} ahora está ${updated.isActive ? "activo" : "inactivo"}.`,
         autoClose: 5000,
         withCloseButton: true,
@@ -108,7 +135,10 @@ export function DashboardPage() {
       notifications.show({
         color: "red",
         title: "No se pudo actualizar el estado",
-        message: error instanceof ApiError ? error.message : "Ocurrió un error inesperado.",
+        message:
+          error instanceof ApiError
+            ? error.message
+            : "Ocurrió un error inesperado.",
         autoClose: 5000,
         withCloseButton: true,
       });
@@ -134,7 +164,8 @@ export function DashboardPage() {
 
   const hasStudents = students.length > 0;
   const showEmptyState = !isLoading && !hasStudents;
-  const showNoMatch = !showEmptyState && !isLoading && filteredStudents.length === 0;
+  const showNoMatch =
+    !showEmptyState && !isLoading && filteredStudents.length === 0;
   const showResults = !showEmptyState && !showNoMatch && !isLoading;
 
   return (
@@ -149,20 +180,49 @@ export function DashboardPage() {
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
-              <Menu.Item onClick={() => setView("pending")}>Pendientes</Menu.Item>
-              <Menu.Item onClick={() => setView("reports")}>Reportes</Menu.Item>
-              <Menu.Item onClick={signOut}>Cerrar sesión</Menu.Item>
+              <Menu.Item
+                leftSection={<IconClockExclamation size={16} />}
+                onClick={() => setView("pending")}
+              >
+                Pendientes
+              </Menu.Item>
+              <Menu.Item
+                leftSection={<IconChartBar size={16} />}
+                onClick={() => setView("reports")}
+              >
+                Reportes
+              </Menu.Item>
+              <Menu.Item
+                color="red"
+                leftSection={<IconLogout size={16} />}
+                onClick={signOut}
+              >
+                Cerrar sesión
+              </Menu.Item>
             </Menu.Dropdown>
           </Menu>
         ) : (
           <Group>
-            <Button variant="subtle" onClick={() => setView("pending")}>
+            <Button
+              variant="light"
+              leftSection={<IconClockExclamation size={18} />}
+              onClick={() => setView("pending")}
+            >
               Pendientes
             </Button>
-            <Button variant="subtle" onClick={() => setView("reports")}>
+            <Button
+              variant="light"
+              leftSection={<IconChartBar size={18} />}
+              onClick={() => setView("reports")}
+            >
               Reportes
             </Button>
-            <Button variant="subtle" onClick={signOut}>
+            <Button
+              variant="outline"
+              color="red"
+              leftSection={<IconLogout size={18} />}
+              onClick={signOut}
+            >
               Cerrar sesión
             </Button>
           </Group>
@@ -171,7 +231,12 @@ export function DashboardPage() {
 
       <Group justify="space-between">
         <Title order={3}>Estudiantes</Title>
-        <Button onClick={() => setIsStudentModalOpen(true)}>Registrar estudiante</Button>
+        <Button
+          leftSection={<IconUserPlus size={18} />}
+          onClick={() => setIsStudentModalOpen(true)}
+        >
+          Registrar estudiante
+        </Button>
       </Group>
 
       <Stack gap="md" style={{ flex: 1, minHeight: 0 }}>
@@ -185,11 +250,17 @@ export function DashboardPage() {
           />
         )}
 
-        <div ref={listAreaRef} style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <div
+          ref={listAreaRef}
+          style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+        >
           {showEmptyState ? (
             <Stack align="center" gap="md" py="xl">
               <Text c="dimmed">Todavía no hay estudiantes registrados.</Text>
-              <Button onClick={() => setIsStudentModalOpen(true)}>
+              <Button
+                leftSection={<IconUserPlus size={18} />}
+                onClick={() => setIsStudentModalOpen(true)}
+              >
                 Registrar primer estudiante
               </Button>
             </Stack>
@@ -218,6 +289,7 @@ export function DashboardPage() {
                       <Stack gap="xs">
                         <Button
                           variant="light"
+                          leftSection={<IconCash size={16} />}
                           fullWidth
                           disabled={!student.isActive}
                           onClick={() => setPaymentStudent(student)}
@@ -226,14 +298,22 @@ export function DashboardPage() {
                         </Button>
                         <Button
                           variant="default"
+                          leftSection={<IconHistory size={16} />}
                           fullWidth
                           onClick={() => setHistoryStudent(student)}
                         >
                           Ver historial
                         </Button>
                         <Button
-                          variant="subtle"
+                          variant="light"
                           color={student.isActive ? "red" : "green"}
+                          leftSection={
+                            student.isActive ? (
+                              <IconUserOff size={16} />
+                            ) : (
+                              <IconUserCheck size={16} />
+                            )
+                          }
                           fullWidth
                           onClick={() => handleToggleStatus(student)}
                         >
@@ -271,6 +351,7 @@ export function DashboardPage() {
                       <Table.Td>
                         <Button
                           variant="light"
+                          leftSection={<IconCash size={16} />}
                           disabled={!student.isActive}
                           onClick={() => setPaymentStudent(student)}
                         >
@@ -278,14 +359,25 @@ export function DashboardPage() {
                         </Button>
                       </Table.Td>
                       <Table.Td>
-                        <Button variant="default" onClick={() => setHistoryStudent(student)}>
+                        <Button
+                          variant="default"
+                          leftSection={<IconHistory size={16} />}
+                          onClick={() => setHistoryStudent(student)}
+                        >
                           Ver historial
                         </Button>
                       </Table.Td>
                       <Table.Td>
                         <Button
-                          variant="subtle"
+                          variant="light"
                           color={student.isActive ? "red" : "green"}
+                          leftSection={
+                            student.isActive ? (
+                              <IconUserOff size={16} />
+                            ) : (
+                              <IconUserCheck size={16} />
+                            )
+                          }
                           onClick={() => handleToggleStatus(student)}
                         >
                           {student.isActive ? "Desactivar" : "Activar"}
@@ -301,7 +393,11 @@ export function DashboardPage() {
 
         {showResults && totalPages > 1 ? (
           <Group justify="center">
-            <Pagination total={totalPages} value={currentPage} onChange={setPage} />
+            <Pagination
+              total={totalPages}
+              value={currentPage}
+              onChange={setPage}
+            />
           </Group>
         ) : null}
       </Stack>
@@ -319,7 +415,10 @@ export function DashboardPage() {
         onCreated={() => undefined}
       />
 
-      <StudentHistoryModal student={historyStudent} onClose={() => setHistoryStudent(null)} />
+      <StudentHistoryModal
+        student={historyStudent}
+        onClose={() => setHistoryStudent(null)}
+      />
     </Stack>
   );
 }

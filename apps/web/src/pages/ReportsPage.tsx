@@ -4,6 +4,7 @@ import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type ReportSummary } from "../api/client";
 import { toDateOnlyString } from "../date";
+import { IconArrowLeft, IconChartBar, IconFileTypeCsv } from "@tabler/icons-react";
 
 function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("es-CO")}`;
@@ -83,7 +84,7 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
     <Stack p="xl" gap="xl">
       <Group justify="space-between">
         <Title order={2}>Reportes</Title>
-        <Button variant="subtle" onClick={onBack}>
+        <Button variant="default" leftSection={<IconArrowLeft size={18} />} onClick={onBack}>
           Volver
         </Button>
       </Group>
@@ -104,10 +105,10 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
           onChange={setTo}
           popoverProps={{ withinPortal: true }}
         />
-        <Button onClick={runReport} loading={isLoading}>
-          Generar reporte
+        <Button color="brandBlue" variant="filled" leftSection={<IconChartBar size={18} />} onClick={runReport} loading={isLoading}>
+          Generar reportes
         </Button>
-        <Button variant="default" onClick={handleExport} loading={isExporting}>
+        <Button variant="light" color="brandBlue" leftSection={<IconFileTypeCsv size={18} />} onClick={handleExport} loading={isExporting}>
           Exportar CSV
         </Button>
       </Group>
@@ -135,7 +136,15 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
             </Card>
           </Group>
 
-          <Table verticalSpacing="sm">
+          <Card withBorder radius="md" padding={0} style={{ overflow: "hidden" }}>
+            <Table
+              withTableBorder
+              withColumnBorders
+              striped
+              highlightOnHover
+              verticalSpacing="sm"
+              horizontalSpacing="lg"
+            >
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Estudiante</Table.Th>
@@ -150,7 +159,8 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
                 </Table.Tr>
               ))}
             </Table.Tbody>
-          </Table>
+            </Table>
+          </Card>
         </Stack>
       ) : null}
     </Stack>
