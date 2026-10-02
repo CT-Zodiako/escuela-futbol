@@ -195,14 +195,16 @@ body::before {
   }
 
   .receipt-print-area {
-    position: static !important;
+    position: fixed !important;
     display: block !important;
+    left: 50% !important;
+    top: 0 !important;
     width: 195mm !important;
     max-width: 195mm !important;
     height: auto !important;
     max-height: none !important;
     margin: 0 !important;
-    transform: none !important;
+    transform: translateX(-50%) !important;
     break-inside: avoid;
     page-break-inside: avoid;
   }
