@@ -1,3 +1,5 @@
+mod sync;
+
 #[tauri::command]
 fn print_receipt(window: tauri::WebviewWindow) -> Result<(), String> {
     window.print().map_err(|error| error.to_string())
@@ -8,7 +10,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![print_receipt])
+        .invoke_handler(tauri::generate_handler![
+            print_receipt,
+            sync::initialize_local,
+            sync::replace_snapshot,
+            sync::local_sync_status,
+            sync::list_local_students,
+            sync::list_local_payments
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Escuela Futbol desktop application");
 }

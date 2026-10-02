@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { isDesktop } from "../api/desktop";
+import { SyncPanel } from "../api/SyncPanel";
 import {
   ActionIcon,
   Badge,
@@ -85,11 +87,7 @@ export function DashboardPage() {
     setPage(1);
   }, [searchTerm, isNarrowScreen]);
 
-  useEffect(() => {
-    loadStudents();
-  }, []);
-
-  async function loadStudents() {
+  const loadStudents = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await api.listStudents();
@@ -108,7 +106,11 @@ export function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    void loadStudents();
+  }, [loadStudents]);
 
   async function handleToggleStatus(student: Student) {
     if (student.isActive) {
@@ -229,9 +231,12 @@ export function DashboardPage() {
         )}
       </Group>
 
+      {isDesktop && <SyncPanel onRefresh={loadStudents} />}
+
       <Group justify="space-between">
         <Title order={3}>Estudiantes</Title>
         <Button
+          style={{ display: isDesktop ? "none" : undefined }}
           leftSection={<IconUserPlus size={18} />}
           onClick={() => setIsStudentModalOpen(true)}
         >
@@ -258,6 +263,7 @@ export function DashboardPage() {
             <Stack align="center" gap="md" py="xl">
               <Text c="dimmed">Todavía no hay estudiantes registrados.</Text>
               <Button
+                style={{ display: isDesktop ? "none" : undefined }}
                 leftSection={<IconUserPlus size={18} />}
                 onClick={() => setIsStudentModalOpen(true)}
               >
@@ -291,6 +297,7 @@ export function DashboardPage() {
                           variant="light"
                           leftSection={<IconCash size={16} />}
                           fullWidth
+                          style={{ display: isDesktop ? "none" : undefined }}
                           disabled={!student.isActive}
                           onClick={() => setPaymentStudent(student)}
                         >
@@ -315,6 +322,7 @@ export function DashboardPage() {
                             )
                           }
                           fullWidth
+                          style={{ display: isDesktop ? "none" : undefined }}
                           onClick={() => handleToggleStatus(student)}
                         >
                           {student.isActive ? "Desactivar" : "Activar"}
@@ -352,6 +360,7 @@ export function DashboardPage() {
                         <Button
                           variant="light"
                           leftSection={<IconCash size={16} />}
+                          style={{ display: isDesktop ? "none" : undefined }}
                           disabled={!student.isActive}
                           onClick={() => setPaymentStudent(student)}
                         >
@@ -378,6 +387,7 @@ export function DashboardPage() {
                               <IconUserCheck size={16} />
                             )
                           }
+                          style={{ display: isDesktop ? "none" : undefined }}
                           onClick={() => handleToggleStatus(student)}
                         >
                           {student.isActive ? "Desactivar" : "Activar"}

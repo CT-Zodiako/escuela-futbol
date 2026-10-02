@@ -1,3 +1,5 @@
+import { desktop, isDesktop, notifySync, type Snapshot } from "./desktop";
+
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
 export class ApiError extends Error {}
@@ -15,6 +17,9 @@ export function setToken(token: string | null) {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  if (isDesktop && options.method && options.method !== "GET" && path !== "/api/auth/login") {
+    throw new ApiError("La aplicación de escritorio es de solo lectura. Registrá cambios en la versión web en línea.");
+  }
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -91,14 +96,35 @@ export interface ReportSummary {
   paidStudents: ReportPaidStudent[];
 }
 
+let refreshInFlight: Promise<void> | null = null;
+export function refreshSnapshot(): Promise<void> {
+  if (!isDesktop) return Promise.resolve();
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      await desktop.initialize();
+      const snapshot = await request<Snapshot>("/api/sync/snapshot");
+      await desktop.replace(snapshot);
+      notifySync(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notifySync(message);
+      throw new ApiError(message);
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ token: string }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
-  listStudents: () => request<Student[]>("/api/students"),
-  listPayments: (studentId: string) =>
+  listStudents: () => isDesktop ? desktop.students() : request<Student[]>("/api/students"),
+  listPayments: (studentId: string) => isDesktop ? desktop.payments(studentId) :
     request<Payment[]>(`/api/payments?studentId=${encodeURIComponent(studentId)}`),
   getReportSummary: (from: string, to: string) =>
     request<ReportSummary>(

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isDesktop, syncEvents } from "../api/desktop";
 import { Button, Modal, Stack, Table, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Payment, type Student } from "../api/client";
@@ -32,28 +33,37 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
   const [receiptPayment, setReceiptPayment] = useState<Payment | null>(null);
 
   useEffect(() => {
+    setPayments([]);
+    setEditingPayment(null);
+    setReceiptPayment(null);
     if (!student) return;
-    loadPayments(student.id);
+    let active = true;
+    let generation = 0;
+    const load = async () => {
+      const current = ++generation;
+      setIsLoading(true);
+      try {
+        const data = await api.listPayments(student.id);
+        if (active && current === generation) setPayments(data);
+      } catch (error) {
+        if (active && current === generation) notifications.show({
+          color: "red",
+          title: "No se pudo cargar el historial",
+          message: error instanceof ApiError ? error.message : String(error),
+          autoClose: 5000,
+          withCloseButton: true,
+        });
+      } finally {
+        if (active && current === generation) setIsLoading(false);
+      }
+    };
+    void load();
+    if (isDesktop) syncEvents.addEventListener("change", load);
+    return () => {
+      active = false;
+      syncEvents.removeEventListener("change", load);
+    };
   }, [student]);
-
-  async function loadPayments(studentId: string) {
-    setIsLoading(true);
-    try {
-      const data = await api.listPayments(studentId);
-      setPayments(data);
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        title: "No se pudo cargar el historial",
-        message:
-          error instanceof ApiError ? error.message : "Ocurrió un error inesperado.",
-        autoClose: 5000,
-        withCloseButton: true,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }
 
   return (
     <>
@@ -92,6 +102,7 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
                         <Button
                           size="xs"
                           variant="default"
+                          style={{ display: isDesktop ? "none" : undefined }}
                           leftSection={<IconPencil size={14} />}
                           onClick={() => setEditingPayment(payment)}
                         >

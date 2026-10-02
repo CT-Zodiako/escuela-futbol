@@ -6,6 +6,7 @@ import { authRoutes } from "./routes/auth.js";
 import { studentRoutes } from "./routes/students.js";
 import { paymentRoutes } from "./routes/payments.js";
 import { reportRoutes } from "./routes/reports.js";
+import { syncRoutes } from "./routes/sync.js";
 
 export function buildServer() {
   const app = Fastify({ logger: true });
@@ -19,6 +20,7 @@ export function buildServer() {
   app.register(studentRoutes);
   app.register(paymentRoutes);
   app.register(reportRoutes);
+  app.register(syncRoutes);
 
   app.get("/api/health", async () => ({ status: "ok" }));
 
