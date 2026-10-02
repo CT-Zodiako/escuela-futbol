@@ -130,7 +130,18 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
   }
 
   return (
-    <Modal opened={payment !== null} onClose={onClose} title="Recibo" centered size="xl">
+    <Modal
+      opened={payment !== null}
+      onClose={onClose}
+      title="Recibo"
+      centered
+      size="xl"
+      classNames={{
+        content: "receipt-modal-content",
+        header: "receipt-modal-header",
+        body: "receipt-modal-body",
+      }}
+    >
       {student && payment ? (
         <Stack gap="lg">
           <div ref={receiptRef} className="receipt-print-area">

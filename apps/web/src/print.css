@@ -177,10 +177,26 @@ body::before {
     visibility: visible;
   }
 
+  .receipt-modal-header {
+    display: none !important;
+  }
+
+  .receipt-modal-content,
+  .receipt-modal-body {
+    border: 0 !important;
+  }
+
+  .receipt-modal-content,
+  .receipt-modal-body {
+    display: block !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
   .receipt-print-area {
-    position: fixed !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
+    display: block !important;
     width: 180mm !important;
     max-width: 180mm !important;
     height: auto !important;
