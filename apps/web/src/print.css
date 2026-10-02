@@ -199,8 +199,8 @@ body::before {
     display: block !important;
     width: 195mm !important;
     max-width: 195mm !important;
-    height: 130mm !important;
-    max-height: 130mm !important;
+    height: auto !important;
+    max-height: none !important;
     margin: 0 !important;
     transform: none !important;
     break-inside: avoid;
