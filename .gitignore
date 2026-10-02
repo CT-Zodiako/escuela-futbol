@@ -13,3 +13,4 @@ apps/api/generated/
 .codegraph/
 apps/desktop/node_modules/
 apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/

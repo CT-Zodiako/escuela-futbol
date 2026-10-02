@@ -87,7 +87,16 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  function handlePrint() {
+  async function handlePrint() {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("print_receipt");
+        return;
+      } catch {
+        // Fall back to the browser print dialog below.
+      }
+    }
     window.print();
   }
 
@@ -161,7 +170,7 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
               </div>
               <div className="receipt-row">
                 <div className="receipt-cell receipt-grow">
-                  Por concepto de: Mensualidad escuela de fútbol
+                  Por concepto de: {payment.concept ?? "Mensualidad escuela de fútbol"}
                 </div>
               </div>
               <div className="receipt-row receipt-tall">

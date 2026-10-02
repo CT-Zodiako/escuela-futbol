@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Modal, NumberInput, Select, Stack, Textarea } from "@mantine/core";
+import { Button, Modal, NumberInput, Select, Stack, Textarea, TextInput } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Payment, type Student } from "../api/client";
@@ -26,6 +26,7 @@ export function PaymentFormModal({
   const isEditing = Boolean(payment);
   const [paymentDate, setPaymentDate] = useState<Date | null>(new Date());
   const [receiptNumber, setReceiptNumber] = useState<number | "">("");
+  const [concept, setConcept] = useState("");
   const [amount, setAmount] = useState<number | "">("");
   const [method, setMethod] = useState("cash");
   const [note, setNote] = useState("");
@@ -36,12 +37,14 @@ export function PaymentFormModal({
     if (!opened) return;
     if (payment) {
       setPaymentDate(parseDateOnly(payment.paymentDate));
+      setConcept(payment.concept ?? "");
       setAmount(payment.amount);
       setMethod(payment.method);
       setNote(payment.note ?? "");
     } else {
       setPaymentDate(new Date());
       setReceiptNumber("");
+      setConcept("");
       setAmount("");
       setMethod("cash");
       setNote("");
@@ -51,8 +54,9 @@ export function PaymentFormModal({
 
   function handleClose() {
     const hasChanges = isEditing
-      ? amount !== payment?.amount || note.trim() !== (payment?.note ?? "")
-      : receiptNumber !== "" || amount !== "" || note.trim() !== "";
+      ? amount !== payment?.amount ||
+        concept.trim() !== (payment?.concept ?? "") || note.trim() !== (payment?.note ?? "")
+      : receiptNumber !== "" || concept.trim() !== "" || amount !== "" || note.trim() !== "";
     if (hasChanges) {
       const confirmed = window.confirm("¿Descartar los datos ingresados?");
       if (!confirmed) return;
@@ -70,6 +74,11 @@ export function PaymentFormModal({
       return;
     }
 
+    if (!concept.trim()) {
+      setError("El concepto es obligatorio.");
+      return;
+    }
+
     if (amount === "" || amount <= 0) {
       setError("No puede ingresar un valor negativo.");
       return;
@@ -80,6 +89,7 @@ export function PaymentFormModal({
     try {
       if (isEditing && payment) {
         const updated = await api.updatePayment(payment.id, {
+          concept: concept.trim(),
           paymentDate: toDateOnlyString(paymentDate),
           amount,
           method,
@@ -97,6 +107,7 @@ export function PaymentFormModal({
         const created = await api.createPayment({
           studentId: student.id,
           receiptNumber: receiptNumber as number,
+          concept: concept.trim(),
           paymentDate: toDateOnlyString(paymentDate),
           amount,
           method,
@@ -160,6 +171,14 @@ export function PaymentFormModal({
               onChange={(value) => setReceiptNumber(typeof value === "number" ? value : "")}
             />
           ) : null}
+          <TextInput
+            label="Concepto"
+            placeholder="Mensualidad escuela de fútbol"
+            withAsterisk
+            maxLength={160}
+            value={concept}
+            onChange={(event) => setConcept(event.currentTarget.value)}
+          />
           <NumberInput
             label="Valor recibido (COP)"
             placeholder="50000"

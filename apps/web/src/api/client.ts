@@ -74,6 +74,7 @@ export interface Payment {
   paymentDate: string;
   amount: number;
   method: string;
+  concept: string | null;
   note: string | null;
 }
 
@@ -116,6 +117,7 @@ export const api = {
   createPayment: (data: {
     studentId: string;
     receiptNumber: number;
+    concept: string;
     paymentDate: string;
     amount: number;
     method: string;
@@ -127,7 +129,7 @@ export const api = {
     }),
   updatePayment: (
     id: string,
-    data: { paymentDate: string; amount: number; method: string; note?: string },
+    data: { concept: string; paymentDate: string; amount: number; method: string; note?: string },
   ) =>
     request<Payment>(`/api/payments/${encodeURIComponent(id)}`, {
       method: "PUT",

@@ -37,6 +37,7 @@ model Payment {
   receiptNumber Int?   @unique @map("numero_comprobante")
   amount      Int      @map("monto")
   method      String   @default("cash") @map("metodo")
+  concept     String?  @map("concepto")
   note        String?  @map("observacion")
   createdAt   DateTime @default(now()) @map("creado_en")
 

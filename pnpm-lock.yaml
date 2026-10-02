@@ -74,6 +74,9 @@ importers:
       '@tabler/icons-react':
         specifier: ^3.21.0
         version: 3.48.0(react@18.3.1)
+      '@tauri-apps/api':
+        specifier: ^2.12.1
+        version: 2.12.1
       dayjs:
         specifier: ^1.11.13
         version: 1.11.13
@@ -1249,6 +1252,9 @@ packages:
 
   '@tabler/icons@3.48.0':
     resolution: {integrity: sha512-lQk06gVHNVBnJp0UOgtth54mcZBJM7rdYKsAxKOProj1bbSAx+/xiuOWfHlyvgdL3M+Y+I0HINrjHa3ygp8eXQ==}
+
+  '@tauri-apps/api@2.12.1':
+    resolution: {integrity: sha512-DeyFHa3wynpyoqTDikDEDGTJIq4LQ5USfolQGRmGIWT6JMADyxZBTDa5cAdT3tDg73rUXufPaCwN7aXBos4OnQ==}
 
   '@tauri-apps/cli-darwin-arm64@2.12.1':
     resolution: {integrity: sha512-8bMnbpJ2jKO/ufrOPL65EMHC3ptw7fzeraoQkwibyfGLqIl+UCWsC0152kmNbW6r9NvVQduXqAZF5mH1QgTWhw==}
@@ -3918,6 +3924,8 @@ snapshots:
       react: 18.3.1
 
   '@tabler/icons@3.48.0': {}
+
+  '@tauri-apps/api@2.12.1': {}
 
   '@tauri-apps/cli-darwin-arm64@2.12.1':
     optional: true

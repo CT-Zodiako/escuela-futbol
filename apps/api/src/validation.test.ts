@@ -31,6 +31,7 @@ describe("createPaymentSchema", () => {
   const base = {
     studentId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
     receiptNumber: 1116,
+    concept: "Mensualidad octubre",
     paymentDate: "2026-09-05",
     method: "cash",
   };
@@ -40,6 +41,12 @@ describe("createPaymentSchema", () => {
     expect(createPaymentSchema.safeParse({ ...without, amount: 50000 }).success).toBe(false);
     expect(createPaymentSchema.safeParse({ ...base, receiptNumber: 0, amount: 50000 }).success).toBe(false);
     expect(createPaymentSchema.safeParse({ ...base, receiptNumber: 1.5, amount: 50000 }).success).toBe(false);
+  });
+
+  it("requires a non-empty concept", () => {
+    const { concept: _omit, ...without } = base;
+    expect(createPaymentSchema.safeParse({ ...without, amount: 50000 }).success).toBe(false);
+    expect(createPaymentSchema.safeParse({ ...base, concept: "   ", amount: 50000 }).success).toBe(false);
   });
 
   it("accepts a valid positive integer amount", () => {
@@ -80,6 +87,7 @@ describe("createPaymentSchema", () => {
 describe("updatePaymentSchema", () => {
   it("does not carry a receipt number through", () => {
     const result = updatePaymentSchema.safeParse({
+      concept: "Mensualidad",
       paymentDate: "2026-09-05",
       amount: 1000,
       receiptNumber: 5,
@@ -88,9 +96,18 @@ describe("updatePaymentSchema", () => {
   });
 
   const base = {
+    concept: "Mensualidad",
     paymentDate: "2026-09-05",
     method: "cash",
   };
+
+  it("requires a concept and allows editing it", () => {
+    expect(updatePaymentSchema.safeParse({ ...base, amount: 1000, concept: "" }).success).toBe(false);
+    const { concept: _omit, ...without } = base;
+    expect(updatePaymentSchema.safeParse({ ...without, amount: 1000 }).success).toBe(false);
+    const edited = updatePaymentSchema.safeParse({ ...base, amount: 1000, concept: "  Uniforme  " });
+    expect(edited.success && edited.data.concept).toBe("Uniforme");
+  });
 
   it("accepts a valid edit", () => {
     const result = updatePaymentSchema.safeParse({ ...base, amount: 60000, note: "Corregido" });

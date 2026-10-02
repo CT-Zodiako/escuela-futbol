@@ -41,6 +41,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       data: {
         studentId: parsed.data.studentId,
         receiptNumber: parsed.data.receiptNumber,
+        concept: parsed.data.concept,
         paymentDate: new Date(parsed.data.paymentDate),
         amount: parsed.data.amount,
         method: parsed.data.method,
@@ -67,6 +68,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     const payment = await prisma.payment.update({
       where: { id },
       data: {
+        concept: parsed.data.concept,
         paymentDate: new Date(parsed.data.paymentDate),
         amount: parsed.data.amount,
         method: parsed.data.method,
