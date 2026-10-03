@@ -1,6 +1,8 @@
 # Escuela Futbol Desktop
 
-Lightweight Tauri shell for the existing React web application. Windows deployment uses an x64 NSIS installer; macOS development and `.app` builds remain supported.
+Lightweight Tauri desktop application. The single Windows x64 installation is the only production client; macOS is for development only. The React package is bundled internally by Tauri and is not deployed as a public web application.
+
+SQLite is the operational production database on the Windows machine. Railway PostgreSQL/API is the cloud synchronization and backup service, not a separate user interface.
 
 ## Install on Windows 10 Pro (64-bit)
 
@@ -51,4 +53,4 @@ VITE_API_URL=https://api-production-28e26.up.railway.app pnpm build:desktop
 
 The default bundle target remains `app`, producing `apps/desktop/src-tauri/target/release/bundle/macos/Escuela Futbol.app` for the Mac's native architecture. Windows CI overrides only the bundle target to NSIS; build each platform on its native operating system. Signing and notarization are not configured.
 
-These packaging steps do not change application behavior or offline SQLite functionality.
+These packaging steps do not change application behavior or offline SQLite functionality. Do not deploy `apps/web` as a standalone site; build it only as the frontend embedded into Tauri.
