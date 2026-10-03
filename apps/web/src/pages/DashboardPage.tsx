@@ -29,7 +29,7 @@ import {
   IconUserPlus,
   IconCash,
 } from "@tabler/icons-react";
-import { api, ApiError, type Student } from "../api/client";
+import { api, ApiError, startPaymentSync, type Student } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { StudentFormModal } from "../components/StudentFormModal";
 import { PaymentFormModal } from "../components/PaymentFormModal";
@@ -111,6 +111,8 @@ export function DashboardPage() {
   useEffect(() => {
     void loadStudents();
   }, [loadStudents]);
+
+  useEffect(() => startPaymentSync(), []);
 
   async function handleToggleStatus(student: Student) {
     if (student.isActive) {
@@ -297,7 +299,6 @@ export function DashboardPage() {
                           variant="light"
                           leftSection={<IconCash size={16} />}
                           fullWidth
-                          style={{ display: isDesktop ? "none" : undefined }}
                           disabled={!student.isActive}
                           onClick={() => setPaymentStudent(student)}
                         >
@@ -360,7 +361,6 @@ export function DashboardPage() {
                         <Button
                           variant="light"
                           leftSection={<IconCash size={16} />}
-                          style={{ display: isDesktop ? "none" : undefined }}
                           disabled={!student.isActive}
                           onClick={() => setPaymentStudent(student)}
                         >
@@ -422,7 +422,9 @@ export function DashboardPage() {
         opened={paymentStudent !== null}
         student={paymentStudent}
         onClose={() => setPaymentStudent(null)}
-        onCreated={() => undefined}
+        onCreated={() => {
+          if (isDesktop) setHistoryStudent(paymentStudent);
+        }}
       />
 
       <StudentHistoryModal

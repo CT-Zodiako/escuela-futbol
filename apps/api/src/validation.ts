@@ -32,16 +32,19 @@ const conceptSchema = z
 
 export const createPaymentSchema = z.object({
   studentId: z.string().uuid("Estudiante inválido."),
+  clientMutationId: z.string().uuid("Identificador de pago inválido.").optional(),
   receiptNumber: z
     .number({ invalid_type_error: "El número de comprobante es obligatorio." })
     .int("El número de comprobante debe ser un número entero.")
-    .positive("El número de comprobante debe ser mayor a cero."),
+    .positive("El número de comprobante debe ser mayor a cero.").optional(),
   concept: conceptSchema,
-  paymentDate: z.string().min(1, "La fecha de pago es obligatoria."),
+  paymentDate: z.string().min(1, "La fecha de pago es obligatoria.")
+    .refine((value) => Number.isFinite(Date.parse(value)), "Fecha de pago inválida."),
   amount: z
     .number()
     .int("El valor debe ser un número entero.")
-    .positive("No puede ingresar un valor negativo."),
+    .positive("No puede ingresar un valor negativo.")
+    .max(2147483647, "El valor es demasiado alto."),
   method: z.string().trim().min(1).default("cash"),
   note: z.string().trim().max(280, "La observación es muy larga.").optional().or(z.literal("")),
 });

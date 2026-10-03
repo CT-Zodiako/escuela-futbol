@@ -24,6 +24,10 @@ pub struct Payment {
     method: String,
     concept: Option<String>,
     note: Option<String>,
+    #[serde(default)]
+    client_mutation_id: Option<String>,
+    #[serde(default)]
+    sync_status: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -53,7 +57,11 @@ fn initialize(conn: &Connection) -> Result<()> {
             payment_date TEXT NOT NULL, payload TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS payments_student ON payments(student_id, payment_date);
         CREATE TABLE IF NOT EXISTS sync_state (
-            id INTEGER PRIMARY KEY CHECK(id = 1), generated_at TEXT NOT NULL);")
+            id INTEGER PRIMARY KEY CHECK(id = 1), generated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS payment_outbox (
+            client_mutation_id TEXT PRIMARY KEY NOT NULL,
+            student_id TEXT NOT NULL, payment_date TEXT NOT NULL,
+            payload TEXT NOT NULL, server_id TEXT);")
         .map_err(|e| e.to_string())
 }
 
@@ -122,11 +130,108 @@ pub fn list_local_students(app: tauri::AppHandle) -> Result<Vec<Student>> {
 
 #[tauri::command]
 pub fn list_local_payments(app: tauri::AppHandle, student_id: String) -> Result<Vec<Payment>> {
-    let conn = open(&app)?;
-    let mut stmt = conn.prepare("SELECT payload FROM payments WHERE student_id = ?1 ORDER BY payment_date DESC, id")
+    local_payments(&open(&app)?, &student_id)
+}
+
+fn local_payments(conn: &Connection, student_id: &str) -> Result<Vec<Payment>> {
+    // Keep acknowledged payloads as a bridge until snapshots include them. Even a
+    // stale snapshot cannot erase a locally recorded payment or show it twice.
+    let mut stmt = conn.prepare("SELECT payload FROM (
+        SELECT payload, payment_date, id FROM payments
+        WHERE student_id = ?1 AND NOT EXISTS (
+            SELECT 1 FROM payment_outbox o WHERE o.server_id IS NULL
+            AND o.client_mutation_id = json_extract(payments.payload, '$.clientMutationId'))
+        UNION ALL
+        SELECT payload, payment_date, client_mutation_id AS id FROM payment_outbox
+        WHERE student_id = ?1 AND (server_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM payments p WHERE p.id = payment_outbox.server_id))
+        ) ORDER BY payment_date DESC, id")
         .map_err(|e| e.to_string())?;
     let rows = stmt.query_map([student_id], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
     rows.map(|row| serde_json::from_str(&row.map_err(|e| e.to_string())?).map_err(|e| e.to_string())).collect()
+}
+
+fn valid_uuid(value: &str) -> bool {
+    value.len() == 36 && value.bytes().enumerate().all(|(i, c)| {
+        if [8, 13, 18, 23].contains(&i) { c == b'-' } else { c.is_ascii_hexdigit() }
+    })
+}
+
+fn valid_date(value: &str) -> bool {
+    let parts: Vec<_> = value.split('-').collect();
+    if parts.len() != 3 || parts[0].len() != 4 || parts[1].len() != 2 || parts[2].len() != 2 {
+        return false;
+    }
+    let (Ok(year), Ok(month), Ok(day)) = (
+        parts[0].parse::<u32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()
+    ) else { return false; };
+    let days = match month {
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => return false,
+    };
+    year > 0 && day > 0 && day <= days
+}
+
+fn enqueue(conn: &Connection, mut payment: Payment) -> Result<Payment> {
+    if !valid_uuid(&payment.id) || payment.client_mutation_id.as_deref() != Some(payment.id.as_str())
+        || !valid_uuid(&payment.student_id) || !valid_date(&payment.payment_date)
+        || payment.amount <= 0 || payment.amount > i32::MAX as i64
+        || payment.method.trim().is_empty()
+        || payment.concept.as_deref().map_or(true, |v| v.trim().is_empty() || v.chars().count() > 160)
+        || payment.note.as_deref().map_or(false, |v| v.chars().count() > 280) {
+        return Err("Datos de pago inválidos.".into());
+    }
+    let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM students WHERE id = ?1)",
+        [&payment.student_id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    if !exists { return Err("Estudiante no encontrado en los datos locales.".into()); }
+    payment.receipt_number = None;
+    payment.sync_status = Some("pending".into());
+    let payload = serde_json::to_string(&payment).map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
+        VALUES (?1, ?2, ?3, ?4) ON CONFLICT(client_mutation_id) DO NOTHING",
+        params![payment.id, payment.student_id, payment.payment_date, payload]).map_err(|e| e.to_string())?;
+    let saved: String = conn.query_row("SELECT payload FROM payment_outbox WHERE client_mutation_id = ?1",
+        [&payment.id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    serde_json::from_str(&saved).map_err(|e| e.to_string())
+}
+
+fn pending(conn: &Connection) -> Result<Vec<Payment>> {
+    let mut stmt = conn.prepare("SELECT payload FROM payment_outbox WHERE server_id IS NULL ORDER BY rowid")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+    rows.map(|row| serde_json::from_str(&row.map_err(|e| e.to_string())?).map_err(|e| e.to_string())).collect()
+}
+
+fn acknowledge(conn: &Connection, client_mutation_id: &str, mut payment: Payment) -> Result<()> {
+    if payment.client_mutation_id.as_deref() != Some(client_mutation_id)
+        || !valid_uuid(&payment.id) || payment.receipt_number.unwrap_or(0) <= 0 {
+        return Err("Respuesta de sincronización inválida.".into());
+    }
+    payment.sync_status = Some("synced".into());
+    let payload = serde_json::to_string(&payment).map_err(|e| e.to_string())?;
+    let changed = conn.execute("UPDATE payment_outbox SET payload = ?1, server_id = ?2
+        WHERE client_mutation_id = ?3 AND student_id = ?4 AND (server_id IS NULL OR server_id = ?2)",
+        params![payload, payment.id, client_mutation_id, payment.student_id]).map_err(|e| e.to_string())?;
+    if changed != 1 { return Err("Pago pendiente no encontrado.".into()); }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn enqueue_payment(app: tauri::AppHandle, payment: Payment) -> Result<Payment> {
+    enqueue(&open(&app)?, payment)
+}
+
+#[tauri::command]
+pub fn list_pending_payments(app: tauri::AppHandle) -> Result<Vec<Payment>> {
+    pending(&open(&app)?)
+}
+
+#[tauri::command]
+pub fn acknowledge_payment(app: tauri::AppHandle, client_mutation_id: String, payment: Payment) -> Result<()> {
+    acknowledge(&open(&app)?, &client_mutation_id, payment)
 }
 
 #[cfg(test)]
@@ -142,6 +247,119 @@ mod tests {
                 "paymentDate":"2026-01-01T00:00:00Z", "amount":100, "method":"cash",
                 "concept":"Monthly", "note":null}]
         })).unwrap()
+    }
+
+    const STUDENT_ID: &str = "b3f1a2c4-1111-4b2b-9c3d-1234567890ab";
+    const MUTATION_ID: &str = "c3f1a2c4-1111-4b2b-9c3d-1234567890ab";
+    const SERVER_ID: &str = "d3f1a2c4-1111-4b2b-9c3d-1234567890ab";
+
+    fn local_snapshot() -> Snapshot {
+        let mut result = snapshot();
+        result.students[0].id = STUDENT_ID.into();
+        result.payments[0].student_id = STUDENT_ID.into();
+        result
+    }
+
+    fn local_payment() -> Payment {
+        serde_json::from_value(serde_json::json!({
+            "id": MUTATION_ID, "clientMutationId": MUTATION_ID,
+            "studentId": STUDENT_ID, "receiptNumber": null,
+            "paymentDate": "2026-02-01", "amount": 100, "method": "cash",
+            "concept": "Mensualidad", "note": null
+        })).unwrap()
+    }
+
+    fn server_payment() -> Payment {
+        let mut payment = local_payment();
+        payment.id = SERVER_ID.into();
+        payment.receipt_number = Some(43);
+        payment.payment_date = "2026-02-01T00:00:00.000Z".into();
+        payment
+    }
+
+    #[test]
+    fn outbox_is_immediately_visible_idempotent_and_preserved_by_initialization() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        let saved = enqueue(&conn, local_payment()).unwrap();
+        assert_eq!(saved.sync_status.as_deref(), Some("pending"));
+        assert_eq!(saved.receipt_number, None);
+        enqueue(&conn, local_payment()).unwrap();
+        initialize(&conn).unwrap(); // additive migration must preserve both tables
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+        let visible = local_payments(&conn, STUDENT_ID).unwrap();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].id, MUTATION_ID);
+        assert_eq!(visible[1].receipt_number, Some(42));
+        replace(&mut conn, local_snapshot()).unwrap();
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+        assert_eq!(local_payments(&conn, STUDENT_ID).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn acknowledgement_survives_stale_snapshots_and_prefers_current_server_data() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        enqueue(&conn, local_payment()).unwrap();
+        acknowledge(&conn, MUTATION_ID, server_payment()).unwrap();
+        acknowledge(&conn, MUTATION_ID, server_payment()).unwrap();
+        assert!(pending(&conn).unwrap().is_empty());
+        replace(&mut conn, local_snapshot()).unwrap();
+        let visible = local_payments(&conn, STUDENT_ID).unwrap();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].id, SERVER_ID);
+        assert_eq!(visible[0].receipt_number, Some(43));
+        assert_eq!(visible[0].sync_status.as_deref(), Some("synced"));
+        let mut fresh = local_snapshot();
+        let mut edited = server_payment();
+        edited.amount = 200;
+        fresh.payments.push(edited);
+        replace(&mut conn, fresh).unwrap();
+        let visible = local_payments(&conn, STUDENT_ID).unwrap();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].amount, 200);
+    }
+
+    #[test]
+    fn lost_response_keeps_one_pending_row_even_if_snapshot_contains_payment() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        enqueue(&conn, local_payment()).unwrap();
+        let mut fresh = local_snapshot();
+        fresh.payments.push(server_payment());
+        replace(&mut conn, fresh).unwrap();
+        assert_eq!(local_payments(&conn, STUDENT_ID).unwrap().len(), 2);
+        assert_eq!(pending(&conn).unwrap()[0].client_mutation_id.as_deref(), Some(MUTATION_ID));
+        let mut invalid = server_payment();
+        invalid.client_mutation_id = None;
+        assert!(acknowledge(&conn, MUTATION_ID, invalid).is_err());
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+        acknowledge(&conn, MUTATION_ID, server_payment()).unwrap();
+        assert!(pending(&conn).unwrap().is_empty());
+        assert_eq!(local_payments(&conn, STUDENT_ID).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn invalid_local_payments_never_enter_outbox() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        assert!(enqueue(&conn, local_payment()).is_err());
+        replace(&mut conn, local_snapshot()).unwrap();
+        for case in 0..5 {
+            let mut payment = local_payment();
+            match case {
+                0 => payment.amount = 0,
+                1 => payment.payment_date = "2026-02-30".into(),
+                2 => payment.client_mutation_id = None,
+                3 => payment.concept = Some(" ".into()),
+                _ => payment.note = Some("x".repeat(281)),
+            }
+            assert!(enqueue(&conn, payment).is_err());
+        }
+        assert!(pending(&conn).unwrap().is_empty());
     }
 
     #[test]

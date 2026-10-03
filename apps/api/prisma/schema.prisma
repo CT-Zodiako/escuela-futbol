@@ -35,6 +35,7 @@ model Payment {
   student     Student  @relation(fields: [studentId], references: [id])
   paymentDate DateTime @map("fecha_pago")
   receiptNumber Int?   @unique @map("numero_comprobante")
+  clientMutationId String? @unique @map("mutacion_cliente_id")
   amount      Int      @map("monto")
   method      String   @default("cash") @map("metodo")
   concept     String?  @map("concepto")
@@ -42,4 +43,12 @@ model Payment {
   createdAt   DateTime @default(now()) @map("creado_en")
 
   @@map("pagos")
+}
+
+// A single row is locked for the duration of each payment creation transaction.
+model ReceiptCounter {
+  id Int @id
+  value Int
+
+  @@map("receipt_counter")
 }

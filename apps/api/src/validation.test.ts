@@ -36,11 +36,19 @@ describe("createPaymentSchema", () => {
     method: "cash",
   };
 
-  it("requires a positive integer receipt number", () => {
+  it("accepts server numbering and validates optional legacy receipt numbers", () => {
     const { receiptNumber: _omit, ...without } = base;
-    expect(createPaymentSchema.safeParse({ ...without, amount: 50000 }).success).toBe(false);
+    expect(createPaymentSchema.safeParse({ ...without, amount: 50000 }).success).toBe(true);
     expect(createPaymentSchema.safeParse({ ...base, receiptNumber: 0, amount: 50000 }).success).toBe(false);
     expect(createPaymentSchema.safeParse({ ...base, receiptNumber: 1.5, amount: 50000 }).success).toBe(false);
+  });
+
+  it("validates mutation UUIDs and payment dates before writing", () => {
+    expect(createPaymentSchema.safeParse({ ...base, amount: 1, clientMutationId: "invalid" }).success).toBe(false);
+    expect(createPaymentSchema.safeParse({ ...base, amount: 1, paymentDate: "invalid" }).success).toBe(false);
+    expect(createPaymentSchema.safeParse({ ...base, amount: 2147483648 }).success).toBe(false);
+    expect(createPaymentSchema.safeParse({ ...base, amount: 1,
+      clientMutationId: "c3f1a2c4-1111-4b2b-9c3d-1234567890ab" }).success).toBe(true);
   });
 
   it("requires a non-empty concept", () => {

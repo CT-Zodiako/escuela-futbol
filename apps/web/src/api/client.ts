@@ -17,8 +17,9 @@ export function setToken(token: string | null) {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  if (isDesktop && options.method && options.method !== "GET" && path !== "/api/auth/login") {
-    throw new ApiError("La aplicación de escritorio es de solo lectura. Registrá cambios en la versión web en línea.");
+  if (isDesktop && options.method && options.method !== "GET" && path !== "/api/auth/login"
+    && !(path === "/api/payments" && options.method === "POST")) {
+    throw new ApiError("Este cambio requiere la versión web en línea. En escritorio podés registrar pagos.");
   }
   const token = getToken();
   const headers: Record<string, string> = {
@@ -31,7 +32,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, { ...options, headers });
+    response = await fetch(`${API_URL}${path}`, { ...options, headers, signal: AbortSignal.timeout(15000) });
   } catch {
     throw new ApiError(
       "No se pudo conectar con el servidor. Verificá tu conexión e intentá de nuevo.",
@@ -76,6 +77,8 @@ export interface Payment {
   id: string;
   studentId: string;
   receiptNumber: number | null;
+  clientMutationId?: string | null;
+  syncStatus?: "pending" | "synced" | null;
   paymentDate: string;
   amount: number;
   method: string;
@@ -96,6 +99,80 @@ export interface ReportSummary {
   paidStudents: ReportPaidStudent[];
 }
 
+export interface CreatePaymentInput {
+  studentId: string;
+  receiptNumber?: number;
+  concept: string;
+  paymentDate: string;
+  amount: number;
+  method: string;
+  note?: string;
+}
+
+let paymentsInFlight: Promise<void> | null = null;
+export function syncPendingPayments(): Promise<void> {
+  if (!isDesktop) return Promise.resolve();
+  if (paymentsInFlight) return paymentsInFlight;
+  paymentsInFlight = (async () => {
+    try {
+      await desktop.initialize();
+      // Drain again after acknowledgements: another payment may have been queued
+      // while requests were in flight. A lost response leaves the same UUID pending.
+      for (;;) {
+        const pending = await desktop.pendingPayments();
+        if (!pending.length) break;
+        const failures: unknown[] = [];
+        for (const payment of pending) {
+          try {
+            const saved = await request<Payment>("/api/payments", {
+              method: "POST",
+              body: JSON.stringify({
+                clientMutationId: payment.clientMutationId,
+                studentId: payment.studentId,
+                concept: payment.concept,
+                paymentDate: payment.paymentDate,
+                amount: payment.amount,
+                method: payment.method,
+                note: payment.note ?? undefined,
+              }),
+            });
+            await desktop.acknowledgePayment(payment.clientMutationId!, saved);
+            notifySync(null);
+          } catch (error) {
+            // One permanently rejected entry must not starve unrelated payments.
+            failures.push(error);
+          }
+        }
+        if (failures.length) throw failures[0];
+      }
+      notifySync(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notifySync(message);
+      throw new ApiError(message);
+    } finally {
+      paymentsInFlight = null;
+    }
+  })();
+  return paymentsInFlight;
+}
+
+// Run only while the authenticated dashboard is mounted. A timer also catches
+// recovery when navigator.onLine stays true but the server was unreachable.
+export function startPaymentSync(): () => void {
+  if (!isDesktop) return () => undefined;
+  const retry = () => {
+    if (getToken()) void syncPendingPayments().catch(() => undefined);
+  };
+  retry();
+  window.addEventListener("online", retry);
+  const timer = window.setInterval(retry, 30000);
+  return () => {
+    window.removeEventListener("online", retry);
+    window.clearInterval(timer);
+  };
+}
+
 let refreshInFlight: Promise<void> | null = null;
 export function refreshSnapshot(): Promise<void> {
   if (!isDesktop) return Promise.resolve();
@@ -103,6 +180,7 @@ export function refreshSnapshot(): Promise<void> {
   refreshInFlight = (async () => {
     try {
       await desktop.initialize();
+      await syncPendingPayments();
       const snapshot = await request<Snapshot>("/api/sync/snapshot");
       await desktop.replace(snapshot);
       notifySync(null);
@@ -140,19 +218,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  createPayment: (data: {
-    studentId: string;
-    receiptNumber: number;
-    concept: string;
-    paymentDate: string;
-    amount: number;
-    method: string;
-    note?: string;
-  }) =>
-    request<Payment>("/api/payments", {
+  createPayment: async (data: CreatePaymentInput): Promise<Payment> => {
+    const clientMutationId = crypto.randomUUID();
+    if (!isDesktop) return request<Payment>("/api/payments", {
       method: "POST",
-      body: JSON.stringify(data),
-    }),
+      body: JSON.stringify({ ...data, clientMutationId }),
+    });
+    await desktop.initialize();
+    const payment = await desktop.enqueuePayment({
+      ...data,
+      id: clientMutationId,
+      clientMutationId,
+      receiptNumber: null,
+      note: data.note ?? null,
+      syncStatus: "pending",
+    });
+    notifySync(null);
+    void syncPendingPayments().catch(() => undefined);
+    return payment;
+  },
   updatePayment: (
     id: string,
     data: { concept: string; paymentDate: string; amount: number; method: string; note?: string },

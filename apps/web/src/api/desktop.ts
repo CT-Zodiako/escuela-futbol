@@ -15,6 +15,10 @@ export const desktop = {
   students: () => invoke<Student[]>("list_local_students"),
   payments: (studentId: string) => invoke<Payment[]>("list_local_payments", { studentId }),
   status: () => invoke<SyncStatus>("local_sync_status"),
+  enqueuePayment: (payment: Payment) => invoke<Payment>("enqueue_payment", { payment }),
+  pendingPayments: () => invoke<Payment[]>("list_pending_payments"),
+  acknowledgePayment: (clientMutationId: string, payment: Payment) =>
+    invoke<void>("acknowledge_payment", { clientMutationId, payment }),
 };
 
 // Failure is shown separately from navigator.onLine: a connected network need not reach the API.

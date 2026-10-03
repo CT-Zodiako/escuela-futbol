@@ -23,32 +23,37 @@ export async function paymentRoutes(app: FastifyInstance) {
       });
     }
 
-    const student = await prisma.student.findUnique({
-      where: { id: parsed.data.studentId },
-    });
-    if (!student) {
-      return reply.status(404).send({ message: "Estudiante no encontrado." });
-    }
+    const result = await prisma.$transaction(async (tx) => {
+      // Serialize allocation AND deduplication across all API processes. The counter
+      // increment rolls back with the payment; retries never consume a receipt.
+      await tx.$queryRaw`SELECT "id" FROM "receipt_counter" WHERE "id" = 1 FOR UPDATE`;
+      if (parsed.data.clientMutationId) {
+        const existing = await tx.payment.findUnique({
+          where: { clientMutationId: parsed.data.clientMutationId },
+        });
+        if (existing) return { status: 200, body: existing };
+      }
+      const student = await tx.student.findUnique({ where: { id: parsed.data.studentId } });
+      if (!student) return { status: 404, body: { message: "Estudiante no encontrado." } };
 
-    const duplicate = await prisma.payment.findUnique({
-      where: { receiptNumber: parsed.data.receiptNumber },
-    });
-    if (duplicate) {
-      return reply.status(409).send({ message: "El número de comprobante ya existe." });
-    }
-
-    const payment = await prisma.payment.create({
-      data: {
-        studentId: parsed.data.studentId,
-        receiptNumber: parsed.data.receiptNumber,
-        concept: parsed.data.concept,
-        paymentDate: new Date(parsed.data.paymentDate),
-        amount: parsed.data.amount,
-        method: parsed.data.method,
-        note: parsed.data.note || null,
-      },
-    });
-    return reply.status(201).send(payment);
+      const [counter] = await tx.$queryRaw<{ value: number }[]>`
+        UPDATE "receipt_counter" SET "value" = "value" + 1 WHERE "id" = 1 RETURNING "value"`;
+      if (!counter) throw new Error("Receipt counter is missing");
+      const payment = await tx.payment.create({
+        data: {
+          studentId: parsed.data.studentId,
+          clientMutationId: parsed.data.clientMutationId,
+          receiptNumber: counter.value,
+          concept: parsed.data.concept,
+          paymentDate: new Date(parsed.data.paymentDate),
+          amount: parsed.data.amount,
+          method: parsed.data.method,
+          note: parsed.data.note || null,
+        },
+      });
+      return { status: 201, body: payment };
+    }, { isolationLevel: "ReadCommitted" });
+    return reply.status(result.status).send(result.body);
   });
 
   app.put("/api/payments/:id", async (request, reply) => {

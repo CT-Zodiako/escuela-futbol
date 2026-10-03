@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Modal, NumberInput, Select, Stack, Textarea, TextInput } from "@mantine/core";
+import { Button, Modal, NumberInput, Select, Stack, Text, Textarea, TextInput } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Payment, type Student } from "../api/client";
@@ -25,7 +25,6 @@ export function PaymentFormModal({
 }: PaymentFormModalProps) {
   const isEditing = Boolean(payment);
   const [paymentDate, setPaymentDate] = useState<Date | null>(new Date());
-  const [receiptNumber, setReceiptNumber] = useState<number | "">("");
   const [concept, setConcept] = useState("");
   const [amount, setAmount] = useState<number | "">("");
   const [method, setMethod] = useState("cash");
@@ -43,7 +42,6 @@ export function PaymentFormModal({
       setNote(payment.note ?? "");
     } else {
       setPaymentDate(new Date());
-      setReceiptNumber("");
       setConcept("");
       setAmount("");
       setMethod("cash");
@@ -56,7 +54,7 @@ export function PaymentFormModal({
     const hasChanges = isEditing
       ? amount !== payment?.amount ||
         concept.trim() !== (payment?.concept ?? "") || note.trim() !== (payment?.note ?? "")
-      : receiptNumber !== "" || concept.trim() !== "" || amount !== "" || note.trim() !== "";
+      : concept.trim() !== "" || amount !== "" || note.trim() !== "";
     if (hasChanges) {
       const confirmed = window.confirm("¿Descartar los datos ingresados?");
       if (!confirmed) return;
@@ -68,11 +66,6 @@ export function PaymentFormModal({
     event.preventDefault();
     if (!paymentDate) return;
     if (!isEditing && !student) return;
-
-    if (!isEditing && (receiptNumber === "" || receiptNumber <= 0)) {
-      setError("El número de comprobante es obligatorio.");
-      return;
-    }
 
     if (!concept.trim()) {
       setError("El concepto es obligatorio.");
@@ -106,7 +99,6 @@ export function PaymentFormModal({
       } else if (student) {
         const created = await api.createPayment({
           studentId: student.id,
-          receiptNumber: receiptNumber as number,
           concept: concept.trim(),
           paymentDate: toDateOnlyString(paymentDate),
           amount,
@@ -116,7 +108,9 @@ export function PaymentFormModal({
         notifications.show({
           color: "green",
           title: "Pago guardado",
-          message: `Se registró el pago de ${student.name}.`,
+          message: created.syncStatus === "pending"
+            ? `Pago de ${student.name} guardado en este equipo. Pendiente de sincronización; el comprobante se asignará al conectar.`
+            : `Se registró el pago de ${student.name}. Comprobante Nº ${created.receiptNumber}.`,
           autoClose: 5000,
           withCloseButton: true,
         });
@@ -158,19 +152,10 @@ export function PaymentFormModal({
             withAsterisk
             popoverProps={{ withinPortal: true }}
           />
-          {!isEditing ? (
-            <NumberInput
-              label="Número de comprobante"
-              placeholder="1116"
-              withAsterisk
-              min={1}
-              allowNegative={false}
-              allowDecimal={false}
-              inputMode="numeric"
-              value={receiptNumber}
-              onChange={(value) => setReceiptNumber(typeof value === "number" ? value : "")}
-            />
-          ) : null}
+          {!isEditing && <Text size="sm" c="dimmed">
+            El número de comprobante se asigna automáticamente al llegar al servidor.
+            Sin conexión, el pago queda pendiente en este equipo.
+          </Text>}
           <TextInput
             label="Concepto"
             placeholder="Mensualidad escuela de fútbol"
@@ -205,6 +190,7 @@ export function PaymentFormModal({
             value={note}
             onChange={(event) => setNote(event.currentTarget.value)}
             autosize
+            maxLength={280}
             minRows={2}
           />
           <Button type="submit" leftSection={<IconDeviceFloppy size={18} />} loading={isSubmitting}>

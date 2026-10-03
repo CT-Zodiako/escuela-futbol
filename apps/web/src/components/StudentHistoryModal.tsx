@@ -87,6 +87,7 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
                   <Table.Th>Valor</Table.Th>
                   <Table.Th>Método</Table.Th>
                   <Table.Th>Observación</Table.Th>
+                  <Table.Th>Comprobante / estado</Table.Th>
                   <Table.Th></Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -97,6 +98,13 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
                     <Table.Td>{formatCurrency(payment.amount)}</Table.Td>
                     <Table.Td>{payment.method === "cash" ? "Efectivo" : payment.method}</Table.Td>
                     <Table.Td>{payment.note ?? "—"}</Table.Td>
+                    <Table.Td>
+                      {payment.syncStatus === "pending"
+                        ? "Pendiente de sincronización"
+                        : payment.receiptNumber != null
+                          ? `Nº ${payment.receiptNumber}${isDesktop ? " · Sincronizado" : ""}`
+                          : "Sin número"}
+                    </Table.Td>
                     <Table.Td>
                       <Stack gap="xs">
                         <Button
@@ -111,6 +119,7 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
                         <Button
                           size="xs"
                           variant="light"
+                          disabled={payment.syncStatus === "pending"}
                           leftSection={<IconReceipt size={14} />}
                           onClick={() => setReceiptPayment(payment)}
                         >
