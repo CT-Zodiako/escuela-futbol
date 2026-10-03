@@ -38,6 +38,17 @@
     "category": "Business",
     "shortDescription": "Gestión de pagos para una escuela de fútbol",
     "longDescription": "Aplicación de escritorio para gestionar estudiantes, pagos y reportes.",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": ["Spanish"],
+        "installMode": "currentUser"
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "11.0"
     }

@@ -1,0 +1,52 @@
+name: Build Windows desktop
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/build-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows x64 NSIS installer
+        run: pnpm --filter @escuela-futbol/desktop build --target x86_64-pc-windows-msvc --bundles nsis
+        env:
+          VITE_API_URL: https://api-production-28e26.up.railway.app
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: escuela-futbol-windows-x64-nsis
+          path: apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
