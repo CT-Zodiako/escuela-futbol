@@ -128,6 +128,7 @@ export function UpdatePanel() {
           {version && <Text fw={600}>Versión disponible: {version}</Text>}
           {busy && <Progress value={progress ?? 100} animated aria-label="Progreso de actualización" />}
           {version && !installed && <>
+            <Text size="sm">Versión actual: <strong>v{appVersion ?? "—"}</strong></Text>
             <Text size="sm">Guardá tu trabajo antes de continuar. La aplicación se cerrará y reiniciará para instalar. Tus datos locales se conservan.</Text>
             <Group justify="flex-end">
               <Button variant="default" disabled={busy} onClick={() => setOpened(false)}>Ahora no</Button>
