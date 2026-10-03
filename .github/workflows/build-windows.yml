@@ -111,7 +111,9 @@ jobs:
           $signature = (Get-Content $signaturePath -Raw -ErrorAction Stop).Trim()
           if (!$signature) { throw 'Updater signature is empty.' }
           $tag = $env:GITHUB_REF_NAME
-          $assetName = [uri]::EscapeDataString($archive.Name)
+          # GitHub release asset URLs normalize spaces to dots; use the published name in metadata.
+          $publishedArchiveName = $archive.Name.Replace(' ', '.')
+          $assetName = [uri]::EscapeDataString($publishedArchiveName)
           $metadata = @{
             version = $tag.Substring(1)
             notes = "Escuela Futbol $tag"
