@@ -18,7 +18,7 @@ export function setToken(token: string | null) {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (isDesktop && options.method && options.method !== "GET" && path !== "/api/auth/login"
-    && !(["/api/payments", "/api/students"].includes(path) && options.method === "POST")) {
+    && !(["/api/payments", "/api/students", "/api/trainers"].includes(path) && options.method === "POST")) {
     throw new ApiError("Este cambio no está disponible en escritorio. Podés registrar estudiantes y pagos.");
   }
   const token = getToken();
@@ -51,7 +51,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export interface Trainer {
+  id: string;
+  name: string;
+  clientMutationId?: string | null;
+  syncStatus?: "pending" | "synced" | null;
+}
+
 export interface Student {
+  trainerId?: string | null;
   id: string;
   name: string;
   document: string | null;
@@ -111,6 +119,33 @@ export interface CreatePaymentInput {
   note?: string;
 }
 
+let trainersInFlight: Promise<void> | null = null;
+export function syncPendingTrainers(): Promise<void> {
+  if (!isDesktop) return Promise.resolve();
+  if (trainersInFlight) return trainersInFlight;
+  trainersInFlight = (async () => {
+    try {
+      await desktop.initialize();
+      for (;;) {
+        const pending = await desktop.pendingTrainers();
+        if (!pending.length) break;
+        const failures: unknown[] = [];
+        for (const trainer of pending) {
+          try {
+            const saved = await request<Trainer>("/api/trainers", {
+              method: "POST",
+              body: JSON.stringify({ name: trainer.name, clientMutationId: trainer.clientMutationId }),
+            });
+            await desktop.acknowledgeTrainer(trainer.clientMutationId!, saved);
+          } catch (error) { failures.push(error); }
+        }
+        if (failures.length) throw failures[0];
+      }
+    } finally { trainersInFlight = null; }
+  })();
+  return trainersInFlight;
+}
+
 let studentsInFlight: Promise<void> | null = null;
 export function syncPendingStudents(): Promise<void> {
   if (!isDesktop) return Promise.resolve();
@@ -132,6 +167,7 @@ export function syncPendingStudents(): Promise<void> {
                 document: student.document ?? undefined,
                 phone: student.phone ?? undefined,
                 activationMonth: student.activationMonth,
+                trainerId: student.trainerId,
               }),
             });
             await desktop.acknowledgeStudent(student.clientMutationId!, saved);
@@ -158,6 +194,7 @@ export function syncPendingStudents(): Promise<void> {
 // payments for other students. Both queues retain failures for the next retry.
 async function syncPendingOutboxes(): Promise<void> {
   const failures: unknown[] = [];
+  try { await syncPendingTrainers(); } catch (error) { failures.push(error); }
   try { await syncPendingStudents(); } catch (error) { failures.push(error); }
   try { await syncPendingPayments(); } catch (error) { failures.push(error); }
   if (failures.length) {
@@ -241,7 +278,9 @@ export function refreshSnapshot(): Promise<void> {
       await desktop.initialize();
       await syncPendingOutboxes();
       const snapshot = await request<Snapshot>("/api/sync/snapshot");
-      await desktop.replace(snapshot);
+      // Fetch trainers separately to remain compatible with the existing snapshot endpoint.
+      const trainers = await request<Trainer[]>("/api/trainers");
+      await desktop.replace({ ...snapshot, trainers });
       notifySync(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -260,6 +299,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  listTrainers: () => isDesktop ? desktop.trainers() : request<Trainer[]>("/api/trainers"),
+  createTrainer: async (data: { name: string }): Promise<Trainer> => {
+    const clientMutationId = crypto.randomUUID();
+    if (!isDesktop) return request<Trainer>("/api/trainers", {
+      method: "POST", body: JSON.stringify({ ...data, clientMutationId }),
+    });
+    await desktop.initialize();
+    const trainer = await desktop.enqueueTrainer({ ...data, id: clientMutationId, clientMutationId });
+    notifySync(null);
+    void syncPendingOutboxes().catch(() => undefined);
+    return trainer;
+  },
   listStudents: () => isDesktop ? desktop.students() : request<Student[]>("/api/students"),
   listPayments: (studentId: string) => isDesktop ? desktop.payments(studentId) :
     request<Payment[]>(`/api/payments?studentId=${encodeURIComponent(studentId)}`),
@@ -268,6 +319,7 @@ export const api = {
       `/api/reports/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     ),
   createStudent: async (data: {
+    trainerId: string;
     name: string;
     document?: string;
     phone?: string;

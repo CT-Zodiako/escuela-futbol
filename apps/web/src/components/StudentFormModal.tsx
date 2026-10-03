@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { Button, Modal, Stack, Text, TextInput } from "@mantine/core";
+import { useEffect, useState } from "react";
+import { Button, Modal, Select, Stack, Text, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { api, ApiError, type Student } from "../api/client";
-import { isDesktop } from "../api/desktop";
+import { api, ApiError, type Student, type Trainer } from "../api/client";
+import { isDesktop, syncEvents } from "../api/desktop";
 import { IconDeviceFloppy } from "@tabler/icons-react";
 
 function currentMonth(): string {
@@ -11,21 +11,37 @@ function currentMonth(): string {
 }
 
 interface StudentFormModalProps {
+  trainerRevision?: number;
   opened: boolean;
   onClose: () => void;
   onCreated: (student: Student) => void;
 }
 
-export function StudentFormModal({ opened, onClose, onCreated }: StudentFormModalProps) {
+export function StudentFormModal({ opened, onClose, onCreated, trainerRevision = 0 }: StudentFormModalProps) {
+  const [trainers, setTrainers] = useState<Trainer[]>([]);
+  const [trainerId, setTrainerId] = useState<string | null>(null);
+  const [trainerError, setTrainerError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!opened) return;
+    let active = true;
+    const load = () => { void api.listTrainers().then((rows) => {
+      if (active) { setTrainers(rows); setTrainerError(null); }
+    }).catch(() => { if (active) setTrainerError("No se pudieron cargar los entrenadores."); }); };
+    load();
+    syncEvents.addEventListener("change", load);
+    return () => { active = false; syncEvents.removeEventListener("change", load); };
+  }, [opened, trainerRevision]);
   const [name, setName] = useState("");
   const [document, setDocument] = useState("");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const hasChanges = name.trim() !== "" || document.trim() !== "" || phone.trim() !== "";
+  const hasChanges = trainerId !== null || name.trim() !== "" || document.trim() !== "" || phone.trim() !== "";
 
   function reset() {
+    setTrainerId(null);
+    setTrainerError(null);
     setName("");
     setDocument("");
     setPhone("");
@@ -49,10 +65,12 @@ export function StudentFormModal({ opened, onClose, onCreated }: StudentFormModa
       setError("El nombre es obligatorio.");
       return;
     }
+    if (!trainerId) { setTrainerError("Seleccioná un entrenador."); return; }
     setError(null);
     setIsSubmitting(true);
     try {
       const student = await api.createStudent({
+        trainerId,
         name: name.trim(),
         document: document.trim() || undefined,
         phone: phone.trim() || undefined,
@@ -100,6 +118,18 @@ export function StudentFormModal({ opened, onClose, onCreated }: StudentFormModa
             onChange={(event) => setName(event.currentTarget.value)}
             error={error ?? undefined}
           />
+          <Select
+            label="Entrenador"
+            withAsterisk
+            searchable
+            value={trainerId}
+            onChange={setTrainerId}
+            data={trainers.map((trainer) => ({ value: trainer.id, label: trainer.name }))}
+            placeholder="Seleccioná un entrenador"
+            nothingFoundMessage="No hay entrenadores"
+            error={trainerError}
+          />
+          {trainers.length === 0 && <Text size="sm" c="dimmed">Primero registrá un entrenador con el botón «Registrar entrenador».</Text>}
           <TextInput
             label="Documento (opcional)"
             value={document}

@@ -30,11 +30,15 @@ export async function studentRoutes(app: FastifyInstance) {
       const existing = await prisma.student.findUnique({ where: { clientMutationId } });
       if (existing) return reply.send(existing);
     }
+    const trainerId = parsed.data.trainerId.toLowerCase();
+    const trainer = await prisma.trainer.findUnique({ where: { id: trainerId } });
+    if (!trainer) return reply.status(400).send({ message: "Entrenador no encontrado." });
     try {
       const student = await prisma.student.create({
         data: {
           // Stable IDs let offline payments reference a student before either syncs.
           ...(clientMutationId ? { id: clientMutationId, clientMutationId } : {}),
+          trainerId,
           name: parsed.data.name,
           document: parsed.data.document || null,
           phone: parsed.data.phone || null,
@@ -47,6 +51,9 @@ export async function studentRoutes(app: FastifyInstance) {
       if (clientMutationId && (error as { code?: string }).code === "P2002") {
         const existing = await prisma.student.findUnique({ where: { clientMutationId } });
         if (existing) return reply.send(existing);
+      }
+      if ((error as { code?: string }).code === "P2003") {
+        return reply.status(400).send({ message: "Entrenador no encontrado." });
       }
       throw error;
     }

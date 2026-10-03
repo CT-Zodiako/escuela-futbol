@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createPaymentSchema, createStudentSchema, updatePaymentSchema } from "./validation.js";
 
 describe("createStudentSchema", () => {
-  it("accepts a student with only a required name", () => {
+  it("accepts a student with a required name and trainer", () => {
     const result = createStudentSchema.safeParse({
       name: "Ana Pérez",
+      trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
       activationMonth: "2026-09",
     });
     expect(result.success).toBe(true);
@@ -13,6 +14,7 @@ describe("createStudentSchema", () => {
   it("rejects a student without a name", () => {
     const result = createStudentSchema.safeParse({
       name: "",
+      trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
       activationMonth: "2026-09",
     });
     expect(result.success).toBe(false);
@@ -21,6 +23,7 @@ describe("createStudentSchema", () => {
   it("rejects an activation month with the wrong format", () => {
     const result = createStudentSchema.safeParse({
       name: "Ana Pérez",
+      trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
       activationMonth: "09-2026",
     });
     expect(result.success).toBe(false);

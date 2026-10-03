@@ -2,11 +2,12 @@ import Fastify from "fastify";
 import jwt from "@fastify/jwt";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const db = vi.hoisted(() => ({ find: vi.fn(), create: vi.fn() }));
-vi.mock("./db.js", () => ({ prisma: { student: { findUnique: db.find, create: db.create } } }));
+const db = vi.hoisted(() => ({ find: vi.fn(), create: vi.fn(), trainer: vi.fn() }));
+vi.mock("./db.js", () => ({ prisma: { trainer: { findUnique: db.trainer }, student: { findUnique: db.find, create: db.create } } }));
 import { studentRoutes } from "./routes/students.js";
 
 const input = {
+  trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
   name: "  Estudiante  ", document: "", phone: "123",
   activationMonth: "2026-09", clientMutationId: "c3f1a2c4-1111-4b2b-9c3d-1234567890ab",
 };
@@ -22,6 +23,7 @@ async function server() {
 beforeEach(() => {
   vi.resetAllMocks();
   db.find.mockResolvedValue(null);
+  db.trainer.mockResolvedValue({ id: input.trainerId });
   db.create.mockImplementation(async ({ data }) => ({ id: "server-id", isActive: true, ...data }));
 });
 afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
@@ -36,6 +38,20 @@ describe("POST /api/students", () => {
     }
     expect(db.find).not.toHaveBeenCalled();
     expect(db.create).not.toHaveBeenCalled();
+  });
+
+  it("requires an existing trainer and leaves rejected students retryable", async () => {
+    const { app, headers } = await server();
+    for (const trainerId of [undefined, null, "bad"]) {
+      expect((await app.inject({ method: "POST", url: "/api/students", headers,
+        payload: { ...input, trainerId } })).statusCode).toBe(400);
+    }
+    db.trainer.mockResolvedValueOnce(null);
+    expect((await app.inject({ method: "POST", url: "/api/students", headers, payload: input })).statusCode).toBe(400);
+    expect(db.create).not.toHaveBeenCalled();
+    const retry = await app.inject({ method: "POST", url: "/api/students", headers, payload: input });
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json().trainerId).toBe(input.trainerId);
   });
 
   it("keeps the offline identity and replays the original row without updating it", async () => {

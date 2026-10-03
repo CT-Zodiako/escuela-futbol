@@ -1,8 +1,9 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { Payment, Student } from "./client";
+import type { Payment, Student, Trainer } from "./client";
 
 export const isDesktop = isTauri();
 export interface Snapshot {
+  trainers?: Trainer[];
   students: Student[];
   payments: Payment[];
   generatedAt: string;
@@ -12,6 +13,11 @@ export interface SyncStatus { generatedAt: string | null }
 export const desktop = {
   initialize: () => invoke<void>("initialize_local"),
   replace: (snapshot: Snapshot) => invoke<void>("replace_snapshot", { snapshot }),
+  trainers: () => invoke<Trainer[]>("list_local_trainers"),
+  enqueueTrainer: (trainer: Trainer) => invoke<Trainer>("enqueue_trainer", { trainer }),
+  pendingTrainers: () => invoke<Trainer[]>("list_pending_trainers"),
+  acknowledgeTrainer: (clientMutationId: string, trainer: Trainer) =>
+    invoke<void>("acknowledge_trainer", { clientMutationId, trainer }),
   students: () => invoke<Student[]>("list_local_students"),
   payments: (studentId: string) => invoke<Payment[]>("list_local_payments", { studentId }),
   status: () => invoke<SyncStatus>("local_sync_status"),

@@ -31,6 +31,7 @@ import {
 } from "@tabler/icons-react";
 import { api, ApiError, startPaymentSync, type Student } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { TrainerFormModal } from "../components/TrainerFormModal";
 import { StudentFormModal } from "../components/StudentFormModal";
 import { PaymentFormModal } from "../components/PaymentFormModal";
 import { StudentHistoryModal } from "../components/StudentHistoryModal";
@@ -46,6 +47,8 @@ export function DashboardPage() {
   const isNarrowScreen = useMediaQuery("(max-width: 640px)");
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isTrainerModalOpen, setIsTrainerModalOpen] = useState(false);
+  const [trainerRevision, setTrainerRevision] = useState(0);
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [paymentStudent, setPaymentStudent] = useState<Student | null>(null);
   const [historyStudent, setHistoryStudent] = useState<Student | null>(null);
@@ -246,6 +249,7 @@ export function DashboardPage() {
 
       <Group justify="space-between">
         <Title order={3}>Estudiantes</Title>
+        <Button variant="light" onClick={() => setIsTrainerModalOpen(true)}>Registrar entrenador</Button>
         <Button
           leftSection={<IconUserPlus size={18} />}
           onClick={() => setIsStudentModalOpen(true)}
@@ -423,7 +427,13 @@ export function DashboardPage() {
         ) : null}
       </Stack>
 
+      <TrainerFormModal
+        opened={isTrainerModalOpen}
+        onClose={() => setIsTrainerModalOpen(false)}
+        onCreated={() => setTrainerRevision((value) => value + 1)}
+      />
       <StudentFormModal
+        trainerRevision={trainerRevision}
         opened={isStudentModalOpen}
         onClose={() => setIsStudentModalOpen(false)}
         onCreated={(student) => {

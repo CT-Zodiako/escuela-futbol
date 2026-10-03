@@ -16,7 +16,19 @@ model Admin {
   @@map("administradores")
 }
 
+model Trainer {
+  id               String    @id @default(uuid())
+  name             String    @map("nombre")
+  clientMutationId String?   @unique @db.Uuid @map("mutacion_cliente_id")
+  createdAt        DateTime  @default(now()) @map("creado_en")
+  students         Student[]
+
+  @@map("entrenadores")
+}
+
 model Student {
+  trainerId       String?   @map("entrenador_id")
+  trainer         Trainer?  @relation(fields: [trainerId], references: [id])
   id              String    @id @default(uuid())
   name            String    @map("nombre")
   document        String?   @map("documento")

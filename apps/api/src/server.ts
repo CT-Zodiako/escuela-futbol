@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import { env } from "./env.js";
 import { authRoutes } from "./routes/auth.js";
+import { trainerRoutes } from "./routes/trainers.js";
 import { studentRoutes } from "./routes/students.js";
 import { paymentRoutes } from "./routes/payments.js";
 import { reportRoutes } from "./routes/reports.js";
@@ -17,6 +18,7 @@ export function buildServer() {
   app.register(jwt, { secret: env.jwtSecret });
 
   app.register(authRoutes);
+  app.register(trainerRoutes);
   app.register(studentRoutes);
   app.register(paymentRoutes);
   app.register(reportRoutes);
