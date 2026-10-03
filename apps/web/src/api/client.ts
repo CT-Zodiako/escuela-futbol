@@ -321,8 +321,8 @@ export const api = {
   createStudent: async (data: {
     trainerId: string;
     name: string;
-    document?: string;
-    phone?: string;
+    document: string;
+    phone: string;
     activationMonth: string;
   }): Promise<Student> => {
     const clientMutationId = crypto.randomUUID();
@@ -335,8 +335,6 @@ export const api = {
       ...data,
       id: clientMutationId,
       clientMutationId,
-      document: data.document ?? null,
-      phone: data.phone ?? null,
       isActive: true,
       syncStatus: "pending",
     });

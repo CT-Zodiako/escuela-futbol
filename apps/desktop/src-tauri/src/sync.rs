@@ -160,6 +160,11 @@ pub struct SyncStatus {
 
 type Result<T> = std::result::Result<T, String>;
 
+/// One-time marker for the v0.2.3 release. Sync failed on some machines, so the
+/// first launch of 0.2.3 wipes local-only data once so those PCs start clean.
+/// Remote/API data and the administrator (never stored locally) are untouched.
+const RESET_0_2_3_MARKER: &str = "reset-local-data-v0.2.3";
+
 fn initialize(conn: &Connection) -> Result<()> {
     conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
     conn.execute_batch("PRAGMA foreign_keys = ON;
@@ -183,8 +188,30 @@ fn initialize(conn: &Connection) -> Result<()> {
             payload TEXT NOT NULL, server_id TEXT);
         CREATE TABLE IF NOT EXISTS student_outbox (
             client_mutation_id TEXT PRIMARY KEY NOT NULL,
-            payload TEXT NOT NULL, server_id TEXT);")
-        .map_err(|e| e.to_string())
+            payload TEXT NOT NULL, server_id TEXT);
+        CREATE TABLE IF NOT EXISTS migration_markers (
+            id TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL);")
+        .map_err(|e| e.to_string())?;
+    apply_one_time_resets(conn)
+}
+
+// Clears local-only tables exactly once per marker. Admins live on the API, so
+// nothing here touches them; schema and markers persist across launches.
+fn apply_one_time_resets(conn: &Connection) -> Result<()> {
+    let applied: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM migration_markers WHERE id = ?1)",
+        [RESET_0_2_3_MARKER], |row| row.get(0)).map_err(|e| e.to_string())?;
+    if applied { return Ok(()); }
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    tx.execute_batch("DELETE FROM payments;
+        DELETE FROM students;
+        DELETE FROM trainers;
+        DELETE FROM trainer_outbox;
+        DELETE FROM payment_outbox;
+        DELETE FROM student_outbox;
+        DELETE FROM sync_state;").map_err(|e| e.to_string())?;
+    tx.execute("INSERT INTO migration_markers(id, applied_at) VALUES (?1, datetime('now'))",
+        [RESET_0_2_3_MARKER]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
 }
 
 fn open(app: &tauri::AppHandle) -> Result<Connection> {
@@ -284,6 +311,8 @@ fn enqueue_student_local(conn: &mut Connection, mut student: Student) -> Result<
     if !valid_uuid(&student.id) || student.id != student.id.to_lowercase()
         || student.client_mutation_id.as_deref() != Some(student.id.as_str())
         || student.name.trim().is_empty()
+        || student.document.as_deref().map_or(true, |v| v.trim().is_empty())
+        || student.phone.as_deref().map_or(true, |v| v.trim().is_empty())
         || !valid_date(&format!("{}-01", student.activation_month)) {
         return Err("Datos de estudiante inválidos.".into());
     }
@@ -292,8 +321,9 @@ fn enqueue_student_local(conn: &mut Connection, mut student: Student) -> Result<
         [trainer_id], |row| row.get(0)).map_err(|e| e.to_string())?;
     if !valid_uuid(trainer_id) || !exists { return Err("Entrenador no encontrado.".into()); }
     student.name = student.name.trim().into();
-    student.document = student.document.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-    student.phone = student.phone.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    // New enqueues require document and phone; only trim them here.
+    student.document = student.document.map(|v| v.trim().to_string());
+    student.phone = student.phone.map(|v| v.trim().to_string());
     student.is_active = true;
     student.sync_status = Some("pending".into());
     let payload = serde_json::to_string(&student).map_err(|e| e.to_string())?;
@@ -551,7 +581,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "id": MUTATION_ID, "clientMutationId": MUTATION_ID,
             "trainerId": SERVER_ID,
-            "name": " New student ", "document": null, "phone": null,
+            "name": " New student ", "document": " 1030456789 ", "phone": "3001234567",
             "isActive": true, "activationMonth": "2026-02"
         })).unwrap()
     }
@@ -619,19 +649,26 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
         enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
-        for case in 0..4 {
+        for case in 0..7 {
             let mut student = offline_student();
             match case {
                 0 => student.name = " ".into(),
                 1 => student.client_mutation_id = None,
                 2 => student.activation_month = "2026-13".into(),
-                _ => student.id = "bad".into(),
+                3 => student.id = "bad".into(),
+                4 => student.document = None,
+                5 => student.document = Some("   ".into()),
+                _ => student.phone = Some(" ".into()),
             }
             assert!(enqueue_student_local(&mut conn, student).is_err());
         }
         assert!(local_students(&conn).unwrap().is_empty());
         assert!(pending_students(&conn).unwrap().is_empty());
         enqueue_student_local(&mut conn, offline_student()).unwrap();
+        let saved = enqueue_student_local(&mut conn, offline_student()).unwrap();
+        assert_eq!(saved.document.as_deref(), Some("1030456789"));
+        assert_eq!(saved.phone.as_deref(), Some("3001234567"));
+        assert_eq!(pending_students(&conn).unwrap().len(), 1);
         let mut wrong = offline_student();
         wrong.id = SERVER_ID.into();
         assert!(acknowledge_student_local(&mut conn, MUTATION_ID, wrong).is_err());
@@ -768,5 +805,54 @@ mod tests {
         replace(&mut conn, Snapshot { trainers: vec![], students: vec![], payments: vec![], generated_at: "empty".into() }).unwrap();
         let count: i64 = conn.query_row("SELECT count(*) FROM students", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 0);
+    }
+
+    fn count_rows(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn release_0_2_3_reset_clears_seeded_local_data_once() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        // Simulate a pre-0.2.3 database: data from the old build, no marker yet.
+        conn.execute("DELETE FROM migration_markers", []).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        enqueue_student_local(&mut conn, offline_student()).unwrap();
+        enqueue(&conn, local_payment()).unwrap();
+        assert!(count_rows(&conn, "payments") > 0);
+        assert!(count_rows(&conn, "student_outbox") > 0);
+        initialize(&conn).unwrap();
+        assert_eq!(count_rows(&conn, "payments"), 0);
+        assert_eq!(count_rows(&conn, "students"), 0);
+        assert_eq!(count_rows(&conn, "trainers"), 0);
+        assert_eq!(count_rows(&conn, "trainer_outbox"), 0);
+        assert_eq!(count_rows(&conn, "student_outbox"), 0);
+        assert_eq!(count_rows(&conn, "payment_outbox"), 0);
+        assert_eq!(count_rows(&conn, "sync_state"), 0);
+        assert_eq!(count_rows(&conn, "migration_markers"), 1);
+        // Schema survives the reset so new data can be created immediately.
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        assert_eq!(count_rows(&conn, "trainer_outbox"), 1);
+    }
+
+    #[test]
+    fn release_0_2_3_reset_does_not_repeat_after_new_data() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap(); // first 0.2.3 launch: reset fires and records the marker
+        replace(&mut conn, local_snapshot()).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        enqueue(&conn, local_payment()).unwrap();
+        initialize(&conn).unwrap(); // later launches must not erase new data
+        assert_eq!(local_students(&conn).unwrap().len(), 1);
+        assert_eq!(read_trainers(&conn, false).unwrap().len(), 1);
+        assert_eq!(local_payments(&conn, STUDENT_ID).unwrap().len(), 2);
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+        assert_eq!(pending_students(&conn).unwrap().len(), 0);
+        assert_eq!(count_rows(&conn, "migration_markers"), 1);
+        let generated_at: Option<String> = conn.query_row("SELECT generated_at FROM sync_state WHERE id = 1",
+            [], |r| r.get(0)).optional().unwrap();
+        assert_eq!(generated_at.as_deref(), Some("2026-01-01T00:00:00Z"));
     }
 }

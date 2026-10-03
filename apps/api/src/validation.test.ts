@@ -2,30 +2,40 @@ import { describe, expect, it } from "vitest";
 import { createPaymentSchema, createStudentSchema, updatePaymentSchema } from "./validation.js";
 
 describe("createStudentSchema", () => {
+  const base = {
+    name: "Ana Pérez",
+    trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+    document: "1030456789",
+    phone: "3001234567",
+    activationMonth: "2026-09",
+  };
+
   it("accepts a student with a required name and trainer", () => {
-    const result = createStudentSchema.safeParse({
-      name: "Ana Pérez",
-      trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
-      activationMonth: "2026-09",
-    });
+    const result = createStudentSchema.safeParse(base);
     expect(result.success).toBe(true);
   });
 
   it("rejects a student without a name", () => {
-    const result = createStudentSchema.safeParse({
-      name: "",
-      trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
-      activationMonth: "2026-09",
-    });
+    const result = createStudentSchema.safeParse({ ...base, name: "" });
     expect(result.success).toBe(false);
   });
 
+  it("requires a non-empty document", () => {
+    const { document: _omit, ...without } = base;
+    expect(createStudentSchema.safeParse(without).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, document: "" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, document: "   " }).success).toBe(false);
+  });
+
+  it("requires a non-empty phone", () => {
+    const { phone: _omit, ...without } = base;
+    expect(createStudentSchema.safeParse(without).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "   " }).success).toBe(false);
+  });
+
   it("rejects an activation month with the wrong format", () => {
-    const result = createStudentSchema.safeParse({
-      name: "Ana Pérez",
-      trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
-      activationMonth: "09-2026",
-    });
+    const result = createStudentSchema.safeParse({ ...base, activationMonth: "09-2026" });
     expect(result.success).toBe(false);
   });
 });

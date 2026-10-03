@@ -35,6 +35,8 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
   const [document, setDocument] = useState("");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [documentError, setDocumentError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const hasChanges = trainerId !== null || name.trim() !== "" || document.trim() !== "" || phone.trim() !== "";
@@ -46,6 +48,8 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
     setDocument("");
     setPhone("");
     setError(null);
+    setDocumentError(null);
+    setPhoneError(null);
   }
 
   function handleClose() {
@@ -65,15 +69,25 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       setError("El nombre es obligatorio.");
       return;
     }
+    if (!document.trim()) {
+      setDocumentError("El documento es obligatorio.");
+      return;
+    }
+    if (!phone.trim()) {
+      setPhoneError("El teléfono es obligatorio.");
+      return;
+    }
     if (!trainerId) { setTrainerError("Seleccioná un entrenador."); return; }
     setError(null);
+    setDocumentError(null);
+    setPhoneError(null);
     setIsSubmitting(true);
     try {
       const student = await api.createStudent({
         trainerId,
         name: name.trim(),
-        document: document.trim() || undefined,
-        phone: phone.trim() || undefined,
+        document: document.trim(),
+        phone: phone.trim(),
         activationMonth: currentMonth(),
       });
       notifications.show({
@@ -131,14 +145,20 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
           />
           {trainers.length === 0 && <Text size="sm" c="dimmed">Primero registrá un entrenador con el botón «Registrar entrenador».</Text>}
           <TextInput
-            label="Documento (opcional)"
+            label="Documento"
+            placeholder="Número de documento"
+            withAsterisk
             value={document}
             onChange={(event) => setDocument(event.currentTarget.value)}
+            error={documentError ?? undefined}
           />
           <TextInput
-            label="Teléfono (opcional)"
+            label="Teléfono"
+            placeholder="Teléfono de contacto"
+            withAsterisk
             value={phone}
             onChange={(event) => setPhone(event.currentTarget.value)}
+            error={phoneError ?? undefined}
           />
           <Button type="submit" leftSection={<IconDeviceFloppy size={18} />} loading={isSubmitting}>
             Guardar

@@ -8,7 +8,7 @@ import { studentRoutes } from "./routes/students.js";
 
 const input = {
   trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
-  name: "  Estudiante  ", document: "", phone: "123",
+  name: "  Estudiante  ", document: " 1030456789 ", phone: "123",
   activationMonth: "2026-09", clientMutationId: "c3f1a2c4-1111-4b2b-9c3d-1234567890ab",
 };
 const apps: ReturnType<typeof Fastify>[] = [];
@@ -32,7 +32,7 @@ describe("POST /api/students", () => {
   it("requires authentication and validates UUIDs before touching storage", async () => {
     const { app, headers } = await server();
     expect((await app.inject({ method: "POST", url: "/api/students", payload: input })).statusCode).toBe(401);
-    for (const invalid of [{ clientMutationId: "bad" }, { name: " " }]) {
+    for (const invalid of [{ clientMutationId: "bad" }, { name: " " }, { document: "" }, { phone: "   " }]) {
       expect((await app.inject({ method: "POST", url: "/api/students", headers,
         payload: { ...input, ...invalid } })).statusCode).toBe(400);
     }
@@ -58,7 +58,7 @@ describe("POST /api/students", () => {
     const { app, headers } = await server();
     const first = await app.inject({ method: "POST", url: "/api/students", headers, payload: input });
     expect(first.statusCode).toBe(201);
-    expect(first.json()).toMatchObject({ id: input.clientMutationId, name: "Estudiante", document: null });
+    expect(first.json()).toMatchObject({ id: input.clientMutationId, name: "Estudiante", document: "1030456789" });
     db.find.mockResolvedValue(first.json());
     const retry = await app.inject({ method: "POST", url: "/api/students", headers,
       payload: { ...input, name: "Changed", clientMutationId: input.clientMutationId.toUpperCase() } });

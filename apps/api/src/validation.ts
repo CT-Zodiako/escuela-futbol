@@ -11,8 +11,14 @@ export const createStudentSchema = z.object({
   trainerId: z.string({ required_error: "Seleccioná un entrenador." }).uuid("Entrenador inválido."),
   clientMutationId: z.string().uuid("Identificador de estudiante inválido.").optional(),
   name: z.string().trim().min(1, "El nombre es obligatorio."),
-  document: z.string().trim().min(1).optional().or(z.literal("")),
-  phone: z.string().trim().min(1).optional().or(z.literal("")),
+  document: z
+    .string({ required_error: "El documento es obligatorio." })
+    .trim()
+    .min(1, "El documento es obligatorio."),
+  phone: z
+    .string({ required_error: "El teléfono es obligatorio." })
+    .trim()
+    .min(1, "El teléfono es obligatorio."),
   activationMonth: z
     .string()
     .regex(monthPattern, "El mes de activación debe tener formato AAAA-MM."),

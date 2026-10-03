@@ -217,13 +217,13 @@ export function DashboardPage() {
                 leftSection={<IconClockExclamation size={16} />}
                 onClick={() => setView("pending")}
               >
-                Pendientes
+                Pagos Pendientes
               </Menu.Item>
               <Menu.Item
                 leftSection={<IconChartBar size={16} />}
                 onClick={() => setView("reports")}
               >
-                Reportes
+                Generar Reportes
               </Menu.Item>
               <Menu.Item
                 color="red"
@@ -241,14 +241,14 @@ export function DashboardPage() {
               leftSection={<IconClockExclamation size={18} />}
               onClick={() => setView("pending")}
             >
-              Pendientes
+              Pagos Pendientes
             </Button>
             <Button
               variant="light"
               leftSection={<IconChartBar size={18} />}
               onClick={() => setView("reports")}
             >
-              Reportes
+              Generar Reportes
             </Button>
             <Button
               variant="outline"
