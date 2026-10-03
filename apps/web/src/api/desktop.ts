@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { Payment, PendingReport, ReportSummary, Student, Trainer } from "./client";
+import type { GeneralReport, Payment, PendingReport, ReportSummary, Student, Trainer } from "./client";
 
 export const isDesktop = isTauri();
 export interface SetupStatus { needsSetup: boolean }
@@ -37,6 +37,10 @@ export const desktop = {
   paymentSummary: (from: string, to: string, trainerId?: string) =>
     invoke<ReportSummary>("local_payment_summary", { from, to, trainerId }),
   pendingReport: (month: string) => invoke<PendingReport>("local_pending_report", { month }),
+  generalReport: (year: number, trainerId?: string) =>
+    invoke<GeneralReport>("local_payment_general_report", { year, trainerId }),
+  exportGeneralReport: (year: number, trainerId?: string) =>
+    invoke<string>("export_local_general_report", { year, trainerId }),
   exportPayments: (from: string, to: string, trainerId?: string) =>
     invoke<string>("export_local_payments", { from, to, trainerId }),
 };

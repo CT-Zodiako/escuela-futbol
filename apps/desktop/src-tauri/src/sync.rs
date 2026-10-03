@@ -652,6 +652,24 @@ pub struct PendingReport {
     students: Vec<PendingStudentReport>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneralReportStudent {
+    student_id: String,
+    name: String,
+    months: [i64; 12],
+    total_paid: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneralReport {
+    year: i64,
+    students: Vec<GeneralReportStudent>,
+    monthly_totals: [i64; 12],
+    total_collected: i64,
+}
+
 fn validate_payment_update(update: &PaymentUpdate) -> Result<()> {
     if !valid_date(&update.payment_date)
         || update.amount <= 0 || update.amount > i32::MAX as i64
@@ -822,6 +840,53 @@ fn pending_report_local(conn: &Connection, month: &str) -> Result<PendingReport>
     })
 }
 
+fn validate_report_year(year: i64, trainer_id: Option<&str>) -> Result<()> {
+    if !(1000..=9999).contains(&year) {
+        return Err("El año debe tener formato AAAA.".into());
+    }
+    if trainer_id.map_or(false, |id| !valid_uuid(id)) {
+        return Err("Entrenador inválido.".into());
+    }
+    Ok(())
+}
+
+// Annual grid mirroring the server report: every student of the (optional)
+// trainer appears, even with no payments, and every visible payment lands in
+// the column of its calendar month.
+fn general_report_local(conn: &Connection, year: i64, trainer_id: Option<&str>) -> Result<GeneralReport> {
+    validate_report_year(year, trainer_id)?;
+    let from = format!("{year:04}-01-01");
+    let to = format!("{year:04}-12-31");
+    let students: Vec<Student> = local_students(conn)?.into_iter()
+        .filter(|student| trainer_id.map_or(true, |id| student.trainer_id.as_deref() == Some(id)))
+        .collect();
+    let mut months_by_student: HashMap<String, [i64; 12]> = students.iter()
+        .map(|student| (student.id.clone(), [0i64; 12])).collect();
+    for payment in all_visible_payments(conn)? {
+        let Some(date) = date_prefix(&payment.payment_date) else { continue; };
+        if date < from.as_str() || date > to.as_str() { continue; }
+        let Some(months) = months_by_student.get_mut(&payment.student_id) else { continue; };
+        // date_prefix guarantees a valid calendar date, so the month is 01-12.
+        let month: usize = date[5..7].parse().map_err(|_| "Fecha de pago inválida.".to_string())?;
+        months[month - 1] += payment.amount;
+    }
+    let mut monthly_totals = [0i64; 12];
+    let rows = students.iter().map(|student| {
+        let months = months_by_student[&student.id];
+        for (index, amount) in months.iter().enumerate() {
+            monthly_totals[index] += amount;
+        }
+        GeneralReportStudent {
+            student_id: student.id.clone(),
+            name: student.name.clone(),
+            months,
+            total_paid: months.iter().sum(),
+        }
+    }).collect();
+    let total_collected = monthly_totals.iter().sum();
+    Ok(GeneralReport { year, students: rows, monthly_totals, total_collected })
+}
+
 fn csv_cell(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
@@ -863,6 +928,29 @@ fn export_payments_local(conn: &Connection, from: &str, to: &str, trainer_id: Op
     Ok(csv)
 }
 
+// Local-safe counterpart of the server XLSX general export: same grid (player,
+// twelve month columns, paid total, monthly totals row) as CSV with a UTF-8
+// BOM so Excel renders the Spanish month names correctly.
+const MONTH_NAMES: [&str; 12] = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+fn export_general_report_local(conn: &Connection, year: i64, trainer_id: Option<&str>) -> Result<String> {
+    let report = general_report_local(conn, year, trainer_id)?;
+    let mut csv = String::from("\u{FEFF}");
+    csv.push_str("Jugador");
+    for name in MONTH_NAMES { csv.push_str(&format!(",{name}")); }
+    csv.push_str(",Total pagado\n");
+    for student in &report.students {
+        csv.push_str(&csv_cell(&student.name));
+        for amount in student.months { csv.push_str(&format!(",{amount}")); }
+        csv.push_str(&format!(",{}\n", student.total_paid));
+    }
+    csv.push_str("TOTAL POR MES");
+    for amount in report.monthly_totals { csv.push_str(&format!(",{amount}")); }
+    csv.push_str(&format!(",{}\n", report.total_collected));
+    Ok(csv)
+}
+
 #[tauri::command]
 pub fn update_local_payment(app: tauri::AppHandle, id: String, update: PaymentUpdate) -> Result<Payment> {
     update_payment_local(&open(&app)?, &id, &update)
@@ -886,6 +974,16 @@ pub fn local_pending_report(app: tauri::AppHandle, month: String) -> Result<Pend
 #[tauri::command]
 pub fn export_local_payments(app: tauri::AppHandle, from: String, to: String, trainer_id: Option<String>) -> Result<String> {
     export_payments_local(&open(&app)?, &from, &to, trainer_id.as_deref())
+}
+
+#[tauri::command]
+pub fn local_payment_general_report(app: tauri::AppHandle, year: i64, trainer_id: Option<String>) -> Result<GeneralReport> {
+    general_report_local(&open(&app)?, year, trainer_id.as_deref())
+}
+
+#[tauri::command]
+pub fn export_local_general_report(app: tauri::AppHandle, year: i64, trainer_id: Option<String>) -> Result<String> {
+    export_general_report_local(&open(&app)?, year, trainer_id.as_deref())
 }
 
 // Local-only administrator accounts. SQLite is the source of truth for desktop
@@ -1912,6 +2010,80 @@ mod tests {
         let filtered = export_payments_local(&conn, "2026-03-01", "2026-03-31", None).unwrap();
         assert!(!filtered.contains("01/02/2026"));
         assert!(export_payments_local(&conn, "bad", "2026-01-01", None).is_err());
+    }
+
+    #[test]
+    fn general_report_buckets_payments_by_month_and_filters_by_trainer() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.students[0].trainer_id = Some(SERVER_ID.into());
+        snapshot.students.push(serde_json::from_value(serde_json::json!({
+            "id": "e3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+            "name": "Second student", "document": null, "phone": null,
+            "isActive": true, "activationMonth": "2026-01" })).unwrap());
+        snapshot.payments[0].payment_date = "2026-01-15T00:00:00.000Z".into();
+        snapshot.payments.push(serde_json::from_value(serde_json::json!({
+            "id": "f3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+            "studentId": "e3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+            "receiptNumber": 44,
+            "paymentDate": "2026-03-20T00:00:00.000Z", "amount": 300,
+            "method": "cash", "concept": "Mensualidad", "note": null })).unwrap());
+        replace(&mut conn, snapshot).unwrap();
+        // A pending offline payment joins the grid without duplicating rows.
+        let mut pending_payment = local_payment();
+        pending_payment.student_id = STUDENT_ID.into();
+        enqueue(&conn, pending_payment).unwrap();
+        let report = general_report_local(&conn, 2026, None).unwrap();
+        assert_eq!(report.year, 2026);
+        assert_eq!(report.students.len(), 2);
+        assert_eq!(report.students[0].name, "Second student");
+        assert_eq!(report.students[0].months[2], 300);
+        assert_eq!(report.students[0].total_paid, 300);
+        let student = report.students.iter().find(|row| row.student_id == STUDENT_ID).unwrap();
+        // 100 in January (snapshot) plus 100 in February (pending offline).
+        assert_eq!(student.months[0], 100);
+        assert_eq!(student.months[1], 100);
+        assert_eq!(student.months[2], 0);
+        assert_eq!(student.total_paid, 200);
+        assert_eq!(report.monthly_totals[0], 100);
+        assert_eq!(report.monthly_totals[1], 100);
+        assert_eq!(report.monthly_totals[2], 300);
+        assert_eq!(report.total_collected, 500);
+        // Trainer filter keeps only that trainer's students.
+        let by_trainer = general_report_local(&conn, 2026, Some(SERVER_ID)).unwrap();
+        assert_eq!(by_trainer.students.len(), 1);
+        assert_eq!(by_trainer.students[0].student_id, STUDENT_ID);
+        assert_eq!(by_trainer.total_collected, 200);
+        // Other years and invalid input are rejected or empty.
+        let other_year = general_report_local(&conn, 2025, None).unwrap();
+        assert_eq!(other_year.total_collected, 0);
+        assert_eq!(other_year.students.len(), 2);
+        assert!(general_report_local(&conn, 999, None).is_err());
+        assert!(general_report_local(&conn, 10000, None).is_err());
+        assert!(general_report_local(&conn, 2026, Some("bad")).is_err());
+    }
+
+    #[test]
+    fn export_general_report_matches_the_annual_grid_and_escapes_names() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.students[0].name = "Doe, John".into();
+        snapshot.payments[0].payment_date = "2026-12-31T00:00:00.000Z".into();
+        replace(&mut conn, snapshot).unwrap();
+        let csv = export_general_report_local(&conn, 2026, None).unwrap();
+        assert!(csv.starts_with('\u{FEFF}'));
+        assert!(csv.contains("Jugador,Enero,Febrero,Marzo,Abril,Mayo,Junio,Julio,Agosto,Septiembre,Octubre,Noviembre,Diciembre,Total pagado"));
+        assert!(csv.contains("\"Doe, John\",0,0,0,0,0,0,0,0,0,0,0,100,100"));
+        assert!(csv.contains("TOTAL POR MES,0,0,0,0,0,0,0,0,0,0,0,100,100"));
+        // One-payment-per-month keeps December a single 100 column.
+        assert!(!csv.contains(",200,200"));
+        let other_year = export_general_report_local(&conn, 2025, None).unwrap();
+        assert!(other_year.contains("TOTAL POR MES,0,0,0,0,0,0,0,0,0,0,0,0,0"));
+        assert!(export_general_report_local(&conn, 999, None).is_err());
+        assert!(export_general_report_local(&conn, 2026, Some("bad")).is_err());
     }
 
     #[test]

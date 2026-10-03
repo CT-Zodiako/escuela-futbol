@@ -37,7 +37,9 @@ pub fn run() {
             sync::set_local_student_status,
             sync::local_payment_summary,
             sync::local_pending_report,
-            sync::export_local_payments
+            sync::export_local_payments,
+            sync::local_payment_general_report,
+            sync::export_local_general_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running Escuela Futbol desktop application");

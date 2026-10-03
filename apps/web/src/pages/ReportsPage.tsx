@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Button, Card, Group, Select, Stack, Table, Text, Title } from "@mantine/core";
+import { Button, Card, Group, Select, Stack, Table, Tabs, Text, Title } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
-import { api, ApiError, type ReportSummary, type Trainer } from "../api/client";
+import { api, ApiError, type GeneralReport, type ReportSummary, type Trainer } from "../api/client";
 import { isDesktop } from "../api/desktop";
 import { toDateOnlyString } from "../date";
 import { IconArrowLeft, IconChartBar, IconFileTypeXls } from "@tabler/icons-react";
@@ -27,6 +27,10 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [generalYear, setGeneralYear] = useState(String(new Date().getFullYear()));
+  const [generalReport, setGeneralReport] = useState<GeneralReport | null>(null);
+  const [isGeneralLoading, setIsGeneralLoading] = useState(false);
+  const [isGeneralExporting, setIsGeneralExporting] = useState(false);
 
   const [trainers, setTrainers] = useState<Trainer[]>([]);
   const [trainerId, setTrainerId] = useState<string>("");
@@ -72,6 +76,33 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
     }
   }
 
+  async function runGeneralReport() {
+    setIsGeneralLoading(true);
+    try {
+      setGeneralReport(await api.getGeneralReport(Number(generalYear), trainerId || undefined));
+    } catch (fetchError) {
+      notifications.show({ color: "red", title: "No se pudo generar el informe general", message: fetchError instanceof ApiError ? fetchError.message : "Ocurrió un error inesperado." });
+    } finally {
+      setIsGeneralLoading(false);
+    }
+  }
+
+  async function exportGeneralReport() {
+    setIsGeneralExporting(true);
+    try {
+      const blob = await api.exportGeneralReport(Number(generalYear), trainerId || undefined);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `informe-general-${generalYear}.xlsx`;
+      document.body.appendChild(link); link.click(); link.remove();
+      URL.revokeObjectURL(link.href);
+    } catch (exportError) {
+      notifications.show({ color: "red", title: "No se pudo exportar", message: exportError instanceof ApiError ? exportError.message : "Ocurrió un error inesperado." });
+    } finally {
+      setIsGeneralExporting(false);
+    }
+  }
+
   async function runReport() {
     if (!from || !to) return;
     if (from > to) {
@@ -107,6 +138,13 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
         </Button>
       </Group>
 
+      <Tabs defaultValue="resumen">
+        <Tabs.List>
+          <Tabs.Tab value="resumen">Resumen</Tabs.Tab>
+          <Tabs.Tab value="general">Informe general</Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="resumen" pt="xl">
       <Group align="flex-end" gap="md" wrap="wrap">
         <Select
           label="Entrenador"
@@ -190,6 +228,33 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
           </Card>
         </Stack>
       ) : null}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="general" pt="xl">
+          <Group align="flex-end" gap="md" wrap="wrap">
+            <Select
+              label="Entrenador"
+              value={trainerId}
+              onChange={(value) => { setTrainerId(value ?? ""); setGeneralReport(null); }}
+              data={[{ value: "", label: "Todos los entrenadores" }, ...trainers.map((trainer) => ({ value: trainer.id, label: trainer.name }))]}
+            />
+            <Select label="Año" value={generalYear} onChange={(value) => { setGeneralYear(value ?? String(new Date().getFullYear())); setGeneralReport(null); }} data={Array.from({ length: 7 }, (_, index) => { const year = new Date().getFullYear() - 3 + index; return { value: String(year), label: String(year) }; })} />
+            <Button color="brandBlue" onClick={runGeneralReport} loading={isGeneralLoading}>Generar informe</Button>
+            <Button variant="light" color="brandBlue" leftSection={<IconFileTypeXls size={18} />} onClick={exportGeneralReport} loading={isGeneralExporting} disabled={!generalReport}>Descargar Excel</Button>
+          </Group>
+          {generalReport ? (
+            <Card withBorder radius="md" padding={0} mt="lg" style={{ overflow: "auto" }}>
+              <Table withTableBorder withColumnBorders striped highlightOnHover stickyHeader>
+                <Table.Thead><Table.Tr><Table.Th>Jugador</Table.Th>{["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"].map((month) => <Table.Th key={month} ta="right">{month}</Table.Th>)}<Table.Th ta="right">Total jugador</Table.Th></Table.Tr></Table.Thead>
+                <Table.Tbody>
+                  {generalReport.students.map((student) => <Table.Tr key={student.studentId}><Table.Td>{student.name}</Table.Td>{student.months.map((amount, index) => <Table.Td key={index} ta="right">{amount ? formatCurrency(amount) : "—"}</Table.Td>)}<Table.Td ta="right" fw={700}>{formatCurrency(student.totalPaid)}</Table.Td></Table.Tr>)}
+                  <Table.Tr fw={700}><Table.Td>Total por mes</Table.Td>{generalReport.monthlyTotals.map((amount, index) => <Table.Td key={index} ta="right">{formatCurrency(amount)}</Table.Td>)}<Table.Td ta="right">{formatCurrency(generalReport.totalCollected)}</Table.Td></Table.Tr>
+                </Table.Tbody>
+              </Table>
+            </Card>
+          ) : <Text c="dimmed" mt="lg">Elegí un año y generá el informe.</Text>}
+        </Tabs.Panel>
+      </Tabs>
     </Stack>
   );
 }

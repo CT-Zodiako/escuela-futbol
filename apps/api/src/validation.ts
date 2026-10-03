@@ -30,6 +30,11 @@ export const monthQuerySchema = z.object({
   month: z.string().regex(monthPattern, "El mes debe tener formato AAAA-MM."),
 });
 
+export const reportYearSchema = z.object({
+  year: z.string().regex(/^\d{4}$/, "El año debe tener formato AAAA."),
+  trainerId: z.string().uuid("Entrenador inválido.").optional(),
+});
+
 export const dateRangeSchema = z
   .object({
     trainerId: z.string().uuid("Entrenador inválido.").optional(),
