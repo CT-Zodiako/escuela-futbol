@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { isDesktop, syncEvents } from "../api/desktop";
+import { isDesktop } from "../api/desktop";
 import { Button, Modal, Stack, Table, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Payment, type Student } from "../api/client";
@@ -58,10 +58,8 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
       }
     };
     void load();
-    if (isDesktop) syncEvents.addEventListener("change", load);
     return () => {
       active = false;
-      syncEvents.removeEventListener("change", load);
     };
   }, [student]);
 
@@ -99,11 +97,9 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
                     <Table.Td>{payment.method === "cash" ? "Efectivo" : payment.method}</Table.Td>
                     <Table.Td>{payment.note ?? "—"}</Table.Td>
                     <Table.Td>
-                      {payment.syncStatus === "pending"
-                        ? "Pendiente de sincronización"
-                        : payment.receiptNumber != null
-                          ? `Nº ${payment.receiptNumber}${isDesktop ? " · Sincronizado" : ""}`
-                          : "Sin número"}
+                      {payment.receiptNumber != null
+                        ? `Nº ${payment.receiptNumber}`
+                        : "Sin número"}
                     </Table.Td>
                     <Table.Td>
                       <Stack gap="xs">
@@ -119,7 +115,6 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
                         <Button
                           size="xs"
                           variant="light"
-                          disabled={payment.syncStatus === "pending"}
                           leftSection={<IconReceipt size={14} />}
                           onClick={() => setReceiptPayment(payment)}
                         >

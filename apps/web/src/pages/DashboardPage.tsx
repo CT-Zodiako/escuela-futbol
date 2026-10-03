@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { isDesktop, syncEvents } from "../api/desktop";
+import { isDesktop } from "../api/desktop";
 import { SyncPanel } from "../api/SyncPanel";
 import { UpdatePanel } from "../api/UpdatePanel";
 import {
@@ -30,7 +30,7 @@ import {
   IconUserPlus,
   IconCash,
 } from "@tabler/icons-react";
-import { api, ApiError, startPaymentSync, type Student, type Trainer } from "../api/client";
+import { api, ApiError, type Student, type Trainer } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { TrainerFormModal } from "../components/TrainerFormModal";
 import { StudentFormModal } from "../components/StudentFormModal";
@@ -128,17 +128,6 @@ export function DashboardPage() {
   useEffect(() => {
     void loadStudents();
   }, [loadStudents, trainerRevision]);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    const reload = () => { void loadStudents(); };
-    syncEvents.addEventListener("change", reload);
-    const stop = startPaymentSync();
-    return () => {
-      stop();
-      syncEvents.removeEventListener("change", reload);
-    };
-  }, [loadStudents]);
 
   async function handleToggleStatus(student: Student) {
     if (student.isActive) {
@@ -262,7 +251,7 @@ export function DashboardPage() {
         )}
       </Group>
 
-      {isDesktop && <SyncPanel onRefresh={loadStudents} />}
+      {isDesktop && <SyncPanel />}
 
       <Group justify="space-between">
         <Title order={3}>Jugadores</Title>
@@ -312,7 +301,6 @@ export function DashboardPage() {
                     <Stack gap="xs">
                       <Group justify="space-between">
                         <Text fw={600}>{student.name}</Text>
-                        {student.syncStatus === "pending" && <Badge color="yellow">Pendiente de sincronización</Badge>}
                         <Badge color={student.isActive ? "green" : "gray"}>
                           {student.isActive ? "Activo" : "Inactivo"}
                         </Badge>
@@ -384,7 +372,6 @@ export function DashboardPage() {
                     <Table.Tr key={student.id}>
                       <Table.Td>
                         {student.name}
-                        {student.syncStatus === "pending" && <Text size="xs" c="orange">Pendiente de sincronización</Text>}
                       </Table.Td>
                       <Table.Td>{student.document ?? "—"}</Table.Td>
                       <Table.Td>{student.phone ?? "—"}</Table.Td>

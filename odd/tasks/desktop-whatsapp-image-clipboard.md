@@ -18,4 +18,5 @@ Share receipt images from the desktop app through WhatsApp and place the image i
 - `apps/web/src/components/ReceiptModal.tsx` already renders the receipt with html2canvas-pro.
 - Desktop is the product; the React web package is only its embedded frontend.
 - Validation: `pnpm build:web` and `VITE_API_URL=https://api-production-28e26.up.railway.app pnpm build:desktop` passed. Manual paste into WhatsApp remains pending.
+- The `VITE_API_URL` injection was later removed; desktop builds are fully local. WhatsApp sharing remains supported.
 - Delivery: no commit created because the user did not explicitly request one.

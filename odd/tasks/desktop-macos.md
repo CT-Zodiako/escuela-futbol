@@ -1,5 +1,9 @@
 # Desktop macOS foundation
 
+> **Superseded:** the "preserving the existing web/PWA deployment" scope below reflects the
+> original milestone. The product is now local-only desktop; `apps/web` remains only as the
+> Tauri-embedded frontend and there is no public web release. Historical evidence is preserved.
+
 ## Goal
 Create a lightweight macOS desktop shell for Escuela Futbol using Tauri while preserving the existing web/PWA deployment.
 

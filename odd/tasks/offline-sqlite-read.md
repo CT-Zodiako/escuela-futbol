@@ -1,5 +1,9 @@
 # Offline SQLite historical read mirror
 
+> **Superseded:** this snapshot/sync slice targeted the hosted Railway API. The desktop product
+> is now fully local (SQLite is the sole store) and no snapshot download, Railway deployment, or
+> `VITE_API_URL` build step applies. Preserved as the historical record of this slice.
+
 ## Goal
 Allow the macOS Tauri app to download a complete student/payment snapshot and consult it without internet, while preserving browser/PWA online behavior.
 
@@ -43,6 +47,6 @@ Allow the macOS Tauri app to download a complete student/payment snapshot and co
 - Run `pnpm install --frozen-lockfile`.
 - Run `pnpm test:api`, `pnpm build:api`, and `pnpm build:web`.
 - Run `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`.
-- Run `VITE_API_URL=https://api-production-28e26.up.railway.app pnpm build:desktop`.
+- (Historical, superseded) Run `VITE_API_URL=https://api-production-28e26.up.railway.app pnpm build:desktop`.
 - Cargo.lock needs regeneration for rusqlite and its bundled SQLite dependencies; left untouched because generated outputs were prohibited. pnpm dependencies were not changed.
-- Deploy the snapshot endpoint before testing refresh against Railway. Verify login/download, close/reopen offline with a saved session, full inactive-student/payment histories, failed refresh retaining data, and browser HTTP behavior. Source tests do not establish these runtime results.
+- (Historical, superseded) Deploy the snapshot endpoint before testing refresh against Railway. Verify login/download, close/reopen offline with a saved session, full inactive-student/payment histories, failed refresh retaining data, and browser HTTP behavior. Source tests do not establish these runtime results.

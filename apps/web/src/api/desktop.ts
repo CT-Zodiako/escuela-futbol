@@ -1,40 +1,42 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { Payment, Student, Trainer } from "./client";
+import type { Payment, PendingReport, ReportSummary, Student, Trainer } from "./client";
 
 export const isDesktop = isTauri();
-export interface Snapshot {
-  trainers?: Trainer[];
-  students: Student[];
-  payments: Payment[];
-  generatedAt: string;
-}
-export interface SyncStatus { generatedAt: string | null }
+export interface SetupStatus { needsSetup: boolean }
+export interface AdminSession { token: string }
+export interface NewAdmin { name: string; email: string; password: string }
 
-export const desktop = {
-  initialize: () => invoke<void>("initialize_local"),
-  replace: (snapshot: Snapshot) => invoke<void>("replace_snapshot", { snapshot }),
-  trainers: () => invoke<Trainer[]>("list_local_trainers"),
-  enqueueTrainer: (trainer: Trainer) => invoke<Trainer>("enqueue_trainer", { trainer }),
-  pendingTrainers: () => invoke<Trainer[]>("list_pending_trainers"),
-  acknowledgeTrainer: (clientMutationId: string, trainer: Trainer) =>
-    invoke<void>("acknowledge_trainer", { clientMutationId, trainer }),
-  students: () => invoke<Student[]>("list_local_students"),
-  payments: (studentId: string) => invoke<Payment[]>("list_local_payments", { studentId }),
-  status: () => invoke<SyncStatus>("local_sync_status"),
-  enqueueStudent: (student: Student) => invoke<Student>("enqueue_student", { student }),
-  pendingStudents: () => invoke<Student[]>("list_pending_students"),
-  acknowledgeStudent: (clientMutationId: string, student: Student) =>
-    invoke<void>("acknowledge_student", { clientMutationId, student }),
-  enqueuePayment: (payment: Payment) => invoke<Payment>("enqueue_payment", { payment }),
-  pendingPayments: () => invoke<Payment[]>("list_pending_payments"),
-  acknowledgePayment: (clientMutationId: string, payment: Payment) =>
-    invoke<void>("acknowledge_payment", { clientMutationId, payment }),
+export const admin = {
+  setupStatus: () => invoke<SetupStatus>("local_setup_status"),
+  createFirstAdmin: (admin: NewAdmin) => invoke<AdminSession>("create_first_admin", { admin }),
+  login: (email: string, password: string) =>
+    invoke<AdminSession>("login_local_admin", { email, password }),
+  logout: (token: string) => invoke<void>("logout_local_admin", { token }),
 };
 
-// Failure is shown separately from navigator.onLine: a connected network need not reach the API.
-export const syncEvents = new EventTarget();
-export let syncError: string | null = null;
-export function notifySync(error: string | null) {
-  syncError = error;
-  syncEvents.dispatchEvent(new Event("change"));
-}
+// Local-only data access. The desktop SQLite database is the single source of
+// truth: there is no snapshot download, no pending outbox sync, and no
+// last-sync status to surface in the UI.
+export const desktop = {
+  initialize: () => invoke<void>("initialize_local"),
+  trainers: () => invoke<Trainer[]>("list_local_trainers"),
+  enqueueTrainer: (trainer: Trainer) => invoke<Trainer>("enqueue_trainer", { trainer }),
+  students: () => invoke<Student[]>("list_local_students"),
+  payments: (studentId: string) => invoke<Payment[]>("list_local_payments", { studentId }),
+  enqueueStudent: (student: Student) => invoke<Student>("enqueue_student", { student }),
+  enqueuePayment: (payment: Payment) => invoke<Payment>("enqueue_payment", { payment }),
+  updatePayment: (id: string, update: {
+    concept: string;
+    paymentDate: string;
+    amount: number;
+    method: string;
+    note?: string | null;
+  }) => invoke<Payment>("update_local_payment", { id, update }),
+  setStudentStatus: (id: string, isActive: boolean) =>
+    invoke<Student>("set_local_student_status", { id, isActive }),
+  paymentSummary: (from: string, to: string, trainerId?: string) =>
+    invoke<ReportSummary>("local_payment_summary", { from, to, trainerId }),
+  pendingReport: (month: string) => invoke<PendingReport>("local_pending_report", { month }),
+  exportPayments: (from: string, to: string, trainerId?: string) =>
+    invoke<string>("export_local_payments", { from, to, trainerId }),
+};

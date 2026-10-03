@@ -1,5 +1,8 @@
 # Cross-platform desktop build (Windows x64 + macOS)
 
+> **Superseded:** the Windows build no longer injects a hosted API URL; the desktop bundle is
+> fully self-contained and local. See the "Local-only desktop cutover" record.
+
 ## Goal
 Produce a distributable Windows x64 installer while preserving the existing macOS development/build path.
 
@@ -20,7 +23,7 @@ Produce a distributable Windows x64 installer while preserving the existing macO
 ## Acceptance criteria
 - Windows x64 build produces an `.exe` installer artifact.
 - macOS `pnpm build:desktop` continues to produce the `.app` bundle.
-- Windows build uses `https://api-production-28e26.up.railway.app` unless overridden by repository configuration.
+- Windows build used `https://api-production-28e26.up.railway.app` at the time (later removed; builds are self-contained local bundles).
 - Existing offline SQLite behavior remains unchanged.
 
 ## Implementation and validation

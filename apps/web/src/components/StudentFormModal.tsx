@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Modal, Select, Stack, Text, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Student, type Trainer } from "../api/client";
-import { isDesktop, syncEvents } from "../api/desktop";
+import { isDesktop } from "../api/desktop";
 import { IconDeviceFloppy } from "@tabler/icons-react";
 
 function currentMonth(): string {
@@ -28,8 +28,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       if (active) { setTrainers(rows); setTrainerError(null); }
     }).catch(() => { if (active) setTrainerError("No se pudieron cargar los entrenadores."); }); };
     load();
-    syncEvents.addEventListener("change", load);
-    return () => { active = false; syncEvents.removeEventListener("change", load); };
+    return () => { active = false; };
   }, [opened, trainerRevision]);
   const [name, setName] = useState("");
   const [document, setDocument] = useState("");
@@ -93,9 +92,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       notifications.show({
         color: "green",
         title: "Jugador registrado",
-        message: student.syncStatus === "pending"
-          ? `${student.name} se guardó en este equipo. Pendiente de sincronización.`
-          : `${student.name} fue agregado correctamente.`,
+        message: `${student.name} fue agregado correctamente.`,
         autoClose: 5000,
         withCloseButton: true,
       });
@@ -123,7 +120,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
     <Modal opened={opened} onClose={handleClose} title="Registrar jugador" centered>
       <form onSubmit={handleSubmit} noValidate>
         <Stack gap="lg">
-          {isDesktop && <Text size="sm" c="dimmed">Se guardará en este equipo, incluso sin conexión. Quedará pendiente de sincronización hasta que el servidor confirme el registro.</Text>}
+          {isDesktop && <Text size="sm" c="dimmed">Se guardará en este equipo. No se requiere conexión a internet.</Text>}
           <TextInput
             label="Nombre"
             placeholder="Nombre y apellido"
