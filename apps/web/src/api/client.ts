@@ -314,9 +314,9 @@ export const api = {
   listStudents: () => isDesktop ? desktop.students() : request<Student[]>("/api/students"),
   listPayments: (studentId: string) => isDesktop ? desktop.payments(studentId) :
     request<Payment[]>(`/api/payments?studentId=${encodeURIComponent(studentId)}`),
-  getReportSummary: (from: string, to: string) =>
+  getReportSummary: (from: string, to: string, trainerId?: string) =>
     request<ReportSummary>(
-      `/api/reports/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      `/api/reports/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${trainerId ? `&trainerId=${encodeURIComponent(trainerId)}` : ""}`,
     ),
   createStudent: async (data: {
     trainerId: string;
@@ -378,10 +378,10 @@ export const api = {
     }),
   getPendingReport: (month: string) =>
     request<PendingReport>(`/api/reports/pending?month=${encodeURIComponent(month)}`),
-  exportPayments: async (from: string, to: string): Promise<Blob> => {
+  exportPayments: async (from: string, to: string, trainerId?: string): Promise<Blob> => {
     const token = getToken();
     const response = await fetch(
-      `${API_URL}/api/reports/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      `${API_URL}/api/reports/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${trainerId ? `&trainerId=${encodeURIComponent(trainerId)}` : ""}`,
       { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
     );
     if (!response.ok) {

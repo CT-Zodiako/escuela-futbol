@@ -24,6 +24,7 @@ export const monthQuerySchema = z.object({
 
 export const dateRangeSchema = z
   .object({
+    trainerId: z.string().uuid("Entrenador inválido.").optional(),
     from: z.string().min(1, "La fecha inicial es obligatoria."),
     to: z.string().min(1, "La fecha final es obligatoria."),
   })

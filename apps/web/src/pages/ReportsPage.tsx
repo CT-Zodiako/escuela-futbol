@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { Button, Card, Group, Stack, Table, Text, Title } from "@mantine/core";
+import { useEffect, useState } from "react";
+import { Button, Card, Group, Select, Stack, Table, Text, Title } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
-import { api, ApiError, type ReportSummary } from "../api/client";
+import { api, ApiError, type ReportSummary, type Trainer } from "../api/client";
 import { toDateOnlyString } from "../date";
 import { IconArrowLeft, IconChartBar, IconFileTypeCsv } from "@tabler/icons-react";
 
@@ -27,11 +27,28 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
+  const [trainers, setTrainers] = useState<Trainer[]>([]);
+  const [trainerId, setTrainerId] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api.listTrainers().then((result) => {
+      if (!cancelled) setTrainers(result);
+    }).catch((loadError) => {
+      if (!cancelled) notifications.show({
+        color: "red",
+        title: "No se pudieron cargar los entrenadores",
+        message: loadError instanceof ApiError ? loadError.message : "Ocurrió un error inesperado.",
+      });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   async function handleExport() {
     if (!from || !to) return;
     setIsExporting(true);
     try {
-      const blob = await api.exportPayments(toDateOnlyString(from), toDateOnlyString(to));
+      const blob = await api.exportPayments(toDateOnlyString(from), toDateOnlyString(to), trainerId || undefined);
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
@@ -64,7 +81,7 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
     setError(null);
     setIsLoading(true);
     try {
-      const result = await api.getReportSummary(toDateOnlyString(from), toDateOnlyString(to));
+      const result = await api.getReportSummary(toDateOnlyString(from), toDateOnlyString(to), trainerId || undefined);
       setSummary(result);
     } catch (fetchError) {
       notifications.show({
@@ -90,6 +107,15 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
       </Group>
 
       <Group align="flex-end" gap="md" wrap="wrap">
+        <Select
+          label="Entrenador"
+          value={trainerId}
+          onChange={(value) => { setTrainerId(value ?? ""); setSummary(null); }}
+          data={[
+            { value: "", label: "Todos los entrenadores" },
+            ...trainers.map((trainer) => ({ value: trainer.id, label: trainer.name })),
+          ]}
+        />
         <DateInput
           label="Desde"
           valueFormat="DD/MM/YYYY"

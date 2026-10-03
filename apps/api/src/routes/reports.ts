@@ -21,7 +21,10 @@ export async function reportRoutes(app: FastifyInstance) {
     to.setHours(23, 59, 59, 999);
 
     const payments = await prisma.payment.findMany({
-      where: { paymentDate: { gte: from, lte: to } },
+      where: {
+        paymentDate: { gte: from, lte: to },
+        ...(parsed.data.trainerId ? { student: { trainerId: parsed.data.trainerId } } : {}),
+      },
       select: {
         amount: true,
         studentId: true,
@@ -109,7 +112,10 @@ export async function reportRoutes(app: FastifyInstance) {
     to.setHours(23, 59, 59, 999);
 
     const payments = await prisma.payment.findMany({
-      where: { paymentDate: { gte: from, lte: to } },
+      where: {
+        paymentDate: { gte: from, lte: to },
+        ...(parsed.data.trainerId ? { student: { trainerId: parsed.data.trainerId } } : {}),
+      },
       orderBy: { paymentDate: "asc" },
       select: {
         paymentDate: true,
