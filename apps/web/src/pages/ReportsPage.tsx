@@ -132,7 +132,7 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
           popoverProps={{ withinPortal: true }}
         />
         <Button color="brandBlue" variant="filled" leftSection={<IconChartBar size={18} />} onClick={runReport} loading={isLoading}>
-          Generar reportes
+          Generar Reportes
         </Button>
         <Button variant="light" color="brandBlue" leftSection={<IconFileTypeXls size={18} />} onClick={handleExport} loading={isExporting}>
           Exportar Excel

@@ -165,9 +165,10 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
         `(Nº ${payment.receiptNumber ?? payment.id.slice(0, 8).toUpperCase()}). ` +
         `Te copié la imagen del recibo: pegala en este chat antes de enviar.`;
       const phone = toWhatsAppPhone(student.phone);
+      // Native WhatsApp Desktop only (product decision: no WhatsApp Web / wa.me fallback).
       const url = phone
-        ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
-        : `https://wa.me/?text=${encodeURIComponent(message)}`;
+        ? `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`
+        : `whatsapp://send?text=${encodeURIComponent(message)}`;
       const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
       let opened = false;
       if (isTauri) {
@@ -179,7 +180,8 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
           opened = false;
         }
       } else {
-        opened = window.open(url, "_blank", "noopener,noreferrer") !== null;
+        // Desktop app only: outside Tauri there is no supported fallback.
+        opened = false;
       }
       notifications.show({
         color: opened ? "green" : "yellow",

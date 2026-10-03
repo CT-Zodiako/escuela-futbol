@@ -342,7 +342,7 @@ export function DashboardPage() {
                           fullWidth
                           onClick={() => setHistoryStudent(student)}
                         >
-                          Ver historial
+                          Ver Historial Pagos
                         </Button>
                         <Button
                           variant="light"
@@ -410,7 +410,7 @@ export function DashboardPage() {
                           leftSection={<IconHistory size={16} />}
                           onClick={() => setHistoryStudent(student)}
                         >
-                          Ver historial
+                          Ver Historial Pagos
                         </Button>
                       </Table.Td>
                       <Table.Td>

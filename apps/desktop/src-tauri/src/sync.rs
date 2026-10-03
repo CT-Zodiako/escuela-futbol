@@ -37,13 +37,26 @@ fn read_trainers(conn: &Connection, pending: bool) -> Result<Vec<Trainer>> {
     rows.map(|row| serde_json::from_str(&row.map_err(|e| e.to_string())?).map_err(|e| e.to_string())).collect()
 }
 
+fn title_case_name(name: &str) -> String {
+    name.split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn enqueue_trainer_local(conn: &mut Connection, mut trainer: Trainer) -> Result<Trainer> {
     if !valid_uuid(&trainer.id) || trainer.id != trainer.id.to_lowercase()
         || trainer.client_mutation_id.as_deref() != Some(trainer.id.as_str())
         || trainer.name.trim().is_empty() {
         return Err("Datos de entrenador inválidos.".into());
     }
-    trainer.name = trainer.name.trim().into();
+    trainer.name = title_case_name(trainer.name.trim());
     trainer.sync_status = Some("pending".into());
     let payload = serde_json::to_string(&trainer).map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;

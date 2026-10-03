@@ -30,6 +30,16 @@ describe("trainer routes", () => {
     expect((await app.inject({ method: "GET", url: "/api/trainers", headers })).json()).toEqual([]);
     expect(db.list).toHaveBeenCalledWith({ orderBy: { name: "asc" } });
   });
+  it("normalizes trainer names to title case on creation", async () => {
+    const { app, headers } = await server();
+    const response = await app.inject({ method: "POST", url: "/api/trainers", headers,
+      payload: { name: "  jUAN   pÉREZ gONZÁLEZ  " } });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().name).toBe("Juan Pérez González");
+    expect(db.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ name: "Juan Pérez González" }),
+    }));
+  });
   it("retains the client UUID and replays the original trainer", async () => {
     const { app, headers } = await server();
     const first = await app.inject({ method: "POST", url: "/api/trainers", headers, payload: input });

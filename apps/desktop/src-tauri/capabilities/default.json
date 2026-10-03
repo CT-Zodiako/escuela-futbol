@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Least-privilege permissions: save receipt PDFs to Downloads, open WhatsApp links, and install signed updates after confirmation.",
+  "description": "Least-privilege permissions: copy receipt images, open WhatsApp Desktop links, and install signed updates after confirmation.",
   "windows": ["main"],
   "permissions": [
     "updater:default",
@@ -12,7 +12,7 @@
     },
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://wa.me/*" }, { "url": "https://wa.me/?*" }]
+      "allow": [{ "url": "whatsapp://*" }]
     }
   ]
 }

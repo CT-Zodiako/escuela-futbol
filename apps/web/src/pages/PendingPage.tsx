@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Button, Group, Stack, Table, Text, Title } from "@mantine/core";
+import { Button, Group, Stack, Table, Text, TextInput, Title } from "@mantine/core";
 import { MonthPickerInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type PendingReport, type Student } from "../api/client";
@@ -24,6 +24,7 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
   const [month, setMonth] = useState<Date | null>(currentMonthDate());
   const [report, setReport] = useState<PendingReport | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
   async function loadReport() {
     if (!month) return;
@@ -31,6 +32,7 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
     try {
       const result = await api.getPendingReport(toMonthString(month));
       setReport(result);
+      setSearchTerm("");
     } catch (error) {
       notifications.show({
         color: "red",
@@ -43,6 +45,16 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
       setIsLoading(false);
     }
   }
+
+  const pendingStudents = report
+    ? report.students.filter((student) => student.status === "pending")
+    : [];
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredPending = normalizedSearch
+    ? pendingStudents.filter((student) =>
+        student.name.toLowerCase().includes(normalizedSearch),
+      )
+    : pendingStudents;
 
   function findStudent(studentId: string): Student | undefined {
     return students.find((s) => s.id === studentId);
@@ -70,55 +82,54 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
         </Button>
       </Group>
 
-      {report && report.students.length === 0 ? (
-        <Text c="dimmed">No hay jugadores activos para este mes.</Text>
+      {report && pendingStudents.length === 0 ? (
+        <Text c="dimmed">No hay jugadores pendientes para este mes.</Text>
       ) : report ? (
         <Stack gap="lg">
-          <Group gap="lg">
-            <Text>
-              <b>{report.paidCount}</b> pagaron
-            </Text>
-            <Text>
-              <b>{report.pendingCount}</b> pendientes
-            </Text>
-          </Group>
+          <Text>
+            <b>{pendingStudents.length}</b> jugadores pendientes
+          </Text>
 
-          <Table verticalSpacing="sm">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Jugador</Table.Th>
-                <Table.Th>Estado</Table.Th>
-                <Table.Th></Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {report.students.map((student) => (
-                <Table.Tr key={student.studentId}>
-                  <Table.Td>{student.name}</Table.Td>
-                  <Table.Td>
-                    {student.status === "paid" ? (
-                      <Badge color="green">Pagado</Badge>
-                    ) : (
-                      <Badge color="orange">Pendiente</Badge>
-                    )}
-                  </Table.Td>
-                  <Table.Td>
-                    <Button
-                      size="xs"
-                      variant="default"
-                      leftSection={<IconHistory size={14} />}
-                      onClick={() => {
-                        const full = findStudent(student.studentId);
-                        if (full) onOpenHistory(full);
-                      }}
-                    >
-                      Ver historial
-                    </Button>
-                  </Table.Td>
+          <TextInput
+            placeholder="Buscar jugador"
+            aria-label="Buscar jugador"
+            leftSection={<IconSearch size={18} />}
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.currentTarget.value)}
+          />
+
+          {filteredPending.length === 0 ? (
+            <Text c="dimmed">No hay jugadores pendientes que coincidan con la búsqueda.</Text>
+          ) : (
+            <Table verticalSpacing="sm">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Jugador</Table.Th>
+                  <Table.Th></Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+              </Table.Thead>
+              <Table.Tbody>
+                {filteredPending.map((student) => (
+                  <Table.Tr key={student.studentId}>
+                    <Table.Td>{student.name}</Table.Td>
+                    <Table.Td>
+                      <Button
+                        size="xs"
+                        variant="default"
+                        leftSection={<IconHistory size={14} />}
+                        onClick={() => {
+                          const full = findStudent(student.studentId);
+                          if (full) onOpenHistory(full);
+                        }}
+                      >
+                        Ver Historial Pagos
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
         </Stack>
       ) : null}
     </Stack>

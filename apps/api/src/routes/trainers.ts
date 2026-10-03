@@ -2,6 +2,14 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "../db.js";
 import { createTrainerSchema } from "../validation.js";
 
+export function titleCaseName(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
 export async function trainerRoutes(app: FastifyInstance) {
   app.addHook("onRequest", async (request, reply) => {
     await request.jwtVerify().catch(() => reply.status(401).send({ message: "No autorizado." }));
@@ -20,7 +28,7 @@ export async function trainerRoutes(app: FastifyInstance) {
     try {
       const trainer = await prisma.trainer.create({ data: {
         ...(clientMutationId ? { id: clientMutationId, clientMutationId } : {}),
-        name: parsed.data.name,
+        name: titleCaseName(parsed.data.name),
       } });
       return reply.status(201).send(trainer);
     } catch (error) {

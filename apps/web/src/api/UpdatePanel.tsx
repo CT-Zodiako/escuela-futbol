@@ -92,12 +92,7 @@ export function UpdatePanel() {
         }
       });
       setInstalled(true);
-      setMessage("Actualización instalada. Reiniciando…");
-      try {
-        await relaunch();
-      } catch {
-        setMessage("Actualización instalada. Cerrá y abrí la aplicación o intentá reiniciar.");
-      }
+      setMessage("Actualización instalada. Cerrá la aplicación completamente y volvé a abrirla para que Windows finalice la instalación. No se volverá a abrir automáticamente.");
     } catch {
       setMessage("No se pudo instalar la actualización. Revisá la conexión o contactá al administrador. Podés intentarlo de nuevo.");
     } finally {
@@ -129,14 +124,14 @@ export function UpdatePanel() {
           {busy && <Progress value={progress ?? 100} animated aria-label="Progreso de actualización" />}
           {version && !installed && <>
             <Text size="sm">Versión actual: <strong>v{appVersion ?? "—"}</strong></Text>
-            <Text size="sm">Guardá tu trabajo antes de continuar. La aplicación se cerrará y reiniciará para instalar. Tus datos locales se conservan.</Text>
+            <Text size="sm">Guardá tu trabajo antes de continuar. Después de instalar, cerrá la aplicación completamente y volvé a abrirla manualmente. Tus datos locales se conservan.</Text>
             <Group justify="flex-end">
               <Button variant="default" disabled={busy} onClick={() => setOpened(false)}>Ahora no</Button>
               <Button loading={busy} onClick={() => void install()}>Confirmar e instalar</Button>
             </Group>
           </>}
           {installed && <Button onClick={() => {
-            void relaunch().catch(() => setMessage("Cerrá y abrí la aplicación para completar la actualización."));
+            void relaunch().catch(() => setMessage("Cerrá la aplicación completamente y volvé a abrirla para que Windows finalice la instalación."));
           }}>Reiniciar aplicación</Button>}
         </Stack>
       </Modal>
