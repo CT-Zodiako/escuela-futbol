@@ -201,7 +201,13 @@ fn initialize(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS admin_sessions (
             token_hash TEXT PRIMARY KEY NOT NULL,
             admin_id TEXT NOT NULL REFERENCES admins(id),
-            created_at TEXT NOT NULL);")
+            created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS receipt_counter (
+            id INTEGER PRIMARY KEY CHECK(id = 1), next_number INTEGER NOT NULL);")
+        .map_err(|e| e.to_string())?;
+    // The counter row is created once and never reset: reinitialization and the
+    // one-time data resets below must not reuse already-issued receipt numbers.
+    conn.execute("INSERT OR IGNORE INTO receipt_counter(id, next_number) VALUES (1, 1)", [])
         .map_err(|e| e.to_string())?;
     apply_one_time_resets(conn)
 }
@@ -268,6 +274,14 @@ fn replace(conn: &mut Connection, snapshot: Snapshot) -> Result<()> {
         tx.execute("INSERT INTO payments(id, student_id, payment_date, payload) VALUES (?1, ?2, ?3, ?4)",
             params![payment.id, payment.student_id, payment.payment_date, payload]).map_err(|e| e.to_string())?;
     }
+    // Imported receipts seed the local sequence at the highest number already
+    // issued, both in snapshot rows and acknowledged outbox bridge rows, so a
+    // fresh snapshot can never reissue an existing number. MAX keeps the
+    // counter monotonic when a snapshot carries older receipts.
+    tx.execute("UPDATE receipt_counter SET next_number = MAX(next_number,
+            COALESCE((SELECT MAX(COALESCE(json_extract(payload, '$.receiptNumber'), 0)) FROM payments), 0) + 1,
+            COALESCE((SELECT MAX(COALESCE(json_extract(payload, '$.receiptNumber'), 0)) FROM payment_outbox), 0) + 1)
+        WHERE id = 1", []).map_err(|e| e.to_string())?;
     tx.execute("INSERT INTO sync_state(id, generated_at) VALUES (1, ?1)
         ON CONFLICT(id) DO UPDATE SET generated_at = excluded.generated_at",
         params![snapshot.generated_at]).map_err(|e| e.to_string())?;
@@ -495,12 +509,30 @@ fn enqueue(conn: &Connection, mut payment: Payment) -> Result<Payment> {
     // Local-only: the row is final once committed, so there is no pending state.
     payment.sync_status = None;
     let payload = serde_json::to_string(&payment).map_err(|e| e.to_string())?;
-    conn.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
+    // Reserve the outbox row first; the shared counter is bumped only when this
+    // transaction owns a brand-new row, so duplicate clientMutationId retries
+    // (even from a concurrent connection) return the stored payload without
+    // consuming a number. Reservation, allocation, and payload write commit as
+    // one transaction, so concurrent writers can never reuse a number.
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    tx.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
         VALUES (?1, ?2, ?3, ?4) ON CONFLICT(client_mutation_id) DO NOTHING",
         params![payment.id, payment.student_id, payment.payment_date, payload]).map_err(|e| e.to_string())?;
-    let saved: String = conn.query_row("SELECT payload FROM payment_outbox WHERE client_mutation_id = ?1",
+    let stored: String = tx.query_row("SELECT payload FROM payment_outbox WHERE client_mutation_id = ?1",
         [&payment.id], |row| row.get(0)).map_err(|e| e.to_string())?;
-    serde_json::from_str(&saved).map_err(|e| e.to_string())
+    let mut saved: Payment = serde_json::from_str(&stored).map_err(|e| e.to_string())?;
+    if saved.receipt_number.is_none() {
+        tx.execute("UPDATE receipt_counter SET next_number = next_number + 1 WHERE id = 1", [])
+            .map_err(|e| e.to_string())?;
+        let number: i64 = tx.query_row("SELECT next_number - 1 FROM receipt_counter WHERE id = 1", [],
+            |row| row.get(0)).map_err(|e| e.to_string())?;
+        saved.receipt_number = Some(number);
+        let payload = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE payment_outbox SET payload = ?1 WHERE client_mutation_id = ?2",
+            params![payload, payment.id]).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(saved)
 }
 
 fn pending(conn: &Connection) -> Result<Vec<Payment>> {
@@ -1074,6 +1106,13 @@ mod tests {
         payment
     }
 
+    fn second_local_payment() -> Payment {
+        let mut payment = local_payment();
+        payment.id = "c3f1a2c4-1111-4b2b-9c3d-1234567890ac".into();
+        payment.client_mutation_id = Some(payment.id.clone());
+        payment
+    }
+
     fn offline_trainer() -> Trainer {
         Trainer { id: SERVER_ID.into(), client_mutation_id: Some(SERVER_ID.into()),
             name: " Trainer ".into(), sync_status: None }
@@ -1288,7 +1327,9 @@ mod tests {
         replace(&mut conn, local_snapshot()).unwrap();
         let saved = enqueue(&conn, local_payment()).unwrap();
         assert_eq!(saved.sync_status.as_deref(), None);
-        assert_eq!(saved.receipt_number, None);
+        // Local payments now carry sequential receipt numbers; the imported
+        // receipt 42 seeds this one at 43.
+        assert_eq!(saved.receipt_number, Some(43));
         enqueue(&conn, local_payment()).unwrap();
         initialize(&conn).unwrap(); // additive migration must preserve both tables
         assert_eq!(pending(&conn).unwrap().len(), 1);
@@ -1390,6 +1431,69 @@ mod tests {
             assert!(enqueue(&conn, payment).is_err());
         }
         assert!(pending(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn first_local_payment_gets_receipt_number_one() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.payments.clear();
+        replace(&mut conn, snapshot).unwrap();
+        let saved = enqueue(&conn, local_payment()).unwrap();
+        assert_eq!(saved.receipt_number, Some(1));
+    }
+
+    #[test]
+    fn second_local_payment_gets_the_next_receipt_number() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.payments.clear();
+        replace(&mut conn, snapshot).unwrap();
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(1));
+        let saved = enqueue(&conn, second_local_payment()).unwrap();
+        assert_eq!(saved.receipt_number, Some(2));
+        assert_eq!(pending(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn idempotent_reenqueue_does_not_consume_a_receipt_number() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.payments.clear();
+        replace(&mut conn, snapshot).unwrap();
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(1));
+        // Re-enqueueing the same client mutation id returns the stored row.
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(1));
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+        // The skipped number is not consumed: the next new payment takes it.
+        assert_eq!(enqueue(&conn, second_local_payment()).unwrap().receipt_number, Some(2));
+        assert_eq!(pending(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn imported_receipts_seed_the_local_sequence() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        // The snapshot payment already holds receipt 42, so the next local
+        // payment continues from 43.
+        let saved = enqueue(&conn, local_payment()).unwrap();
+        assert_eq!(saved.receipt_number, Some(43));
+    }
+
+    #[test]
+    fn reinitialization_preserves_the_receipt_counter() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(43));
+        // Additive migrations must not reset the sequence or reuse issued numbers.
+        initialize(&conn).unwrap();
+        let saved = enqueue(&conn, second_local_payment()).unwrap();
+        assert_eq!(saved.receipt_number, Some(44));
     }
 
     #[test]
