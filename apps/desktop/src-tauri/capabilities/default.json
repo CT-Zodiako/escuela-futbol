@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Least-privilege permissions: save receipt PDFs to Downloads and open WhatsApp links.",
+  "description": "Least-privilege permissions: save receipt PDFs to Downloads, open WhatsApp links, and install signed updates after confirmation.",
   "windows": ["main"],
   "permissions": [
+    "updater:default",
     {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$DOWNLOAD/*" }]

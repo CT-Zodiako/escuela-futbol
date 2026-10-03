@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isDesktop, syncEvents } from "../api/desktop";
 import { SyncPanel } from "../api/SyncPanel";
+import { UpdatePanel } from "../api/UpdatePanel";
 import {
   ActionIcon,
   Badge,
@@ -187,7 +188,10 @@ export function DashboardPage() {
   return (
     <Stack h="100dvh" p="xl" gap="xl" style={{ overflow: "hidden" }}>
       <Group justify="space-between">
-        <Title order={2}>Escuela Futbol</Title>
+        <Group>
+          <Title order={2}>Escuela Futbol</Title>
+          {isDesktop && <UpdatePanel />}
+        </Group>
         {isNarrowScreen ? (
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>

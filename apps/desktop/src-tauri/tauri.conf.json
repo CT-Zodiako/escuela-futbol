@@ -24,8 +24,17 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA5MDcwMDJDM0QyM0U4M0UKUldRKzZDTTlMQUFIQ1ZGWGlCcURFRzRoL0pqakFYYVgzT2pJWm5mMkw1TkFRTXdKM0ZCdWUxbk8K",
+      "endpoints": [
+        "https://github.com/CT-Zodiako/escuela-futbol/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "targets": ["app"],
     "icon": [
       "icons/32x32.png",
