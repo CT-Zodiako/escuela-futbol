@@ -146,35 +146,29 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
     busyRef.current = true;
     setIsSharing(true);
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import("html2canvas-pro"),
-        import("jspdf"),
-      ]);
+      const { default: html2canvas } = await import("html2canvas-pro");
       const canvas = await html2canvas(receiptRef.current, { backgroundColor: "#ffffff", scale: 2 });
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
-      const margin = 10;
-      const width = pdf.internal.pageSize.getWidth() - margin * 2;
-      const height = (canvas.height * width) / canvas.width;
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, margin, width, height);
-      const fileName = `recibo-${student.name.replace(/\s+/g, "-").toLowerCase()}-${payment.id.slice(0, 8)}.pdf`;
-      const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-      if (isTauri) {
-        const { writeFile, BaseDirectory } = await import("@tauri-apps/plugin-fs");
-        await writeFile(fileName, new Uint8Array(pdf.output("arraybuffer")), {
-          baseDir: BaseDirectory.Download,
-        });
-      } else {
-        pdf.save(fileName);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("No se pudo generar la imagen del recibo.");
+
+      if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+        throw new Error("Tu navegador no permite copiar imágenes al portapapeles.");
+      }
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      } catch {
+        throw new Error("No se pudo copiar la imagen del recibo al portapapeles.");
       }
 
       const message =
         `Hola, te comparto el recibo de pago de ${student.name} por ${formatCurrency(payment.amount)} COP ` +
         `(Nº ${payment.receiptNumber ?? payment.id.slice(0, 8).toUpperCase()}). ` +
-        `Adjunto el PDF del recibo a este chat.`;
+        `Te copié la imagen del recibo: pegala en este chat antes de enviar.`;
       const phone = toWhatsAppPhone(student.phone);
       const url = phone
         ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
         : `https://wa.me/?text=${encodeURIComponent(message)}`;
+      const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
       let opened = false;
       if (isTauri) {
         try {
@@ -189,18 +183,21 @@ export function ReceiptModal({ student, payment, onClose }: ReceiptModalProps) {
       }
       notifications.show({
         color: opened ? "green" : "yellow",
-        title: isTauri ? "PDF guardado en Descargas" : "PDF descargado",
+        title: opened ? "Imagen copiada y WhatsApp abierto" : "Imagen copiada al portapapeles",
         message: opened
-          ? "Se abrió WhatsApp con el mensaje. Adjuntá manualmente el PDF descargado antes de enviar."
-          : "No se pudo abrir WhatsApp automáticamente. Abrilo manualmente y adjuntá el PDF descargado.",
+          ? "Se abrió WhatsApp con el mensaje. Pegá (Ctrl+V) la imagen copiada en el chat antes de enviar."
+          : "No se pudo abrir WhatsApp automáticamente. Abrilo manualmente y pegá (Ctrl+V) la imagen copiada en el chat.",
         autoClose: 7000,
         withCloseButton: true,
       });
-    } catch {
+    } catch (error) {
       notifications.show({
         color: "red",
-        title: "No se pudo generar el PDF",
-        message: "Ocurrió un error inesperado. Intentá de nuevo.",
+        title: "No se pudo compartir el recibo",
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : "Ocurrió un error inesperado. Intentá de nuevo.",
         autoClose: 5000,
         withCloseButton: true,
       });
