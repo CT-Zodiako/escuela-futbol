@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Group, Modal, Progress, Stack, Text } from "@mantine/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
-import { desktop } from "./desktop";
 
 export function UpdatePanel() {
   const update = useRef<Update | null>(null);
@@ -92,7 +92,7 @@ export function UpdatePanel() {
       setInstalled(true);
       setMessage("Actualización instalada. Reiniciando…");
       try {
-        await desktop.restart();
+        await relaunch();
       } catch {
         setMessage("Actualización instalada. Cerrá y abrí la aplicación o intentá reiniciar.");
       }
@@ -133,7 +133,7 @@ export function UpdatePanel() {
             </Group>
           </>}
           {installed && <Button onClick={() => {
-            void desktop.restart().catch(() => setMessage("Cerrá y abrí la aplicación para completar la actualización."));
+            void relaunch().catch(() => setMessage("Cerrá y abrí la aplicación para completar la actualización."));
           }}>Reiniciar aplicación</Button>}
         </Stack>
       </Modal>

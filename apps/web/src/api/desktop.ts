@@ -11,7 +11,6 @@ export interface Snapshot {
 export interface SyncStatus { generatedAt: string | null }
 
 export const desktop = {
-  restart: () => invoke<void>("restart_app"),
   initialize: () => invoke<void>("initialize_local"),
   replace: (snapshot: Snapshot) => invoke<void>("replace_snapshot", { snapshot }),
   trainers: () => invoke<Trainer[]>("list_local_trainers"),
