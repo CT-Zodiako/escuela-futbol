@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Group, Modal, Progress, Stack, Text } from "@mantine/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { desktop } from "./desktop";
 
@@ -11,16 +12,35 @@ export function UpdatePanel() {
   const [busy, setBusy] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
   const [installed, setInstalled] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
 
   useEffect(() => {
     mounted.current = true;
+    void getVersion().then((value) => {
+      if (mounted.current) setAppVersion(value);
+    }).catch(() => undefined);
+    void probeUpdate();
     return () => {
       mounted.current = false;
       if (!locked.current) void update.current?.close().catch(() => {});
     };
   }, []);
+
+  async function probeUpdate() {
+    try {
+      const result = await check();
+      if (!mounted.current) {
+        await result?.close();
+        return;
+      }
+      update.current = result;
+      setVersion(result?.version ?? null);
+    } catch {
+      // Automatic checks are silent; the manual button shows the error.
+    }
+  }
 
   async function checkUpdate() {
     if (locked.current) return;
@@ -87,10 +107,18 @@ export function UpdatePanel() {
 
   return (
     <>
-      <Button variant="subtle" size="compact-sm" onClick={() => {
-        if (installed) setOpened(true);
-        else void checkUpdate();
-      }}>Actualizaciones</Button>
+      <Text size="sm" c="dimmed">v{appVersion ?? "…"}</Text>
+      <Button
+        variant={version ? "light" : "subtle"}
+        color={version ? "blue" : undefined}
+        size="compact-sm"
+        onClick={() => {
+          if (installed) setOpened(true);
+          else void checkUpdate();
+        }}
+      >
+        {version ? "Actualización disponible" : "Actualizaciones"}
+      </Button>
       <Modal opened={opened} onClose={() => { if (!busy) setOpened(false); }}
         title="Actualizaciones" closeOnClickOutside={!busy} closeOnEscape={!busy} withCloseButton={!busy}>
         <Stack>
