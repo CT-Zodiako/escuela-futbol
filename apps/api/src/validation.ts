@@ -14,11 +14,13 @@ export const createStudentSchema = z.object({
   document: z
     .string({ required_error: "El documento es obligatorio." })
     .trim()
-    .min(1, "El documento es obligatorio."),
+    .min(1, "El documento es obligatorio.")
+    .regex(/^\d+$/, "El documento debe contener solo números, sin puntos ni espacios."),
   phone: z
     .string({ required_error: "El teléfono es obligatorio." })
     .trim()
-    .min(1, "El teléfono es obligatorio."),
+    .min(1, "El teléfono es obligatorio.")
+    .regex(/^\d{10}$/, "El teléfono debe tener exactamente 10 dígitos."),
   activationMonth: z
     .string()
     .regex(monthPattern, "El mes de activación debe tener formato AAAA-MM."),

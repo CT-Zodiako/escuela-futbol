@@ -8,7 +8,7 @@ import { studentRoutes } from "./routes/students.js";
 
 const input = {
   trainerId: "b3f1a2c4-1111-4b2b-9c3d-1234567890ab",
-  name: "  Estudiante  ", document: " 1030456789 ", phone: "123",
+  name: "  Estudiante  ", document: " 1030456789 ", phone: "3001234567",
   activationMonth: "2026-09", clientMutationId: "c3f1a2c4-1111-4b2b-9c3d-1234567890ab",
 };
 const apps: ReturnType<typeof Fastify>[] = [];

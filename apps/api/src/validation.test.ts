@@ -38,6 +38,31 @@ describe("createStudentSchema", () => {
     const result = createStudentSchema.safeParse({ ...base, activationMonth: "09-2026" });
     expect(result.success).toBe(false);
   });
+
+  it("rejects documents containing anything other than digits", () => {
+    for (const document of ["1030 456 789", "1.030.456.789", "1030-456-789", "doc103045", "1030456789a", ""]) {
+      expect(createStudentSchema.safeParse({ ...base, document }).success, document).toBe(false);
+    }
+    expect(createStudentSchema.safeParse({ ...base, document: "   " }).success).toBe(false);
+  });
+
+  it("accepts documents with digits only regardless of length", () => {
+    expect(createStudentSchema.safeParse({ ...base, document: "7" }).success).toBe(true);
+    expect(createStudentSchema.safeParse({ ...base, document: "123456" }).success).toBe(true);
+    expect(createStudentSchema.safeParse({ ...base, document: "1030456789" }).success).toBe(true);
+    expect(createStudentSchema.safeParse({ ...base, document: "10304567890123" }).success).toBe(true);
+  });
+
+  it("requires a phone with exactly 10 ASCII digits", () => {
+    expect(createStudentSchema.safeParse({ ...base, phone: "30012345" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "300123456" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "30012345678" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "300-123-4567" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "30012 4567" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "30012a4567" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "١٢٣4567890" }).success).toBe(false);
+    expect(createStudentSchema.safeParse({ ...base, phone: "3001234567" }).success).toBe(true);
+  });
 });
 
 describe("createPaymentSchema", () => {

@@ -68,12 +68,20 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       setError("El nombre es obligatorio.");
       return;
     }
-    if (!document.trim()) {
+    if (!document) {
       setDocumentError("El documento es obligatorio.");
       return;
     }
-    if (!phone.trim()) {
+    if (!/^\d+$/.test(document)) {
+      setDocumentError("El documento debe contener solo números, sin puntos ni espacios.");
+      return;
+    }
+    if (!phone) {
       setPhoneError("El teléfono es obligatorio.");
+      return;
+    }
+    if (!/^\d{10}$/.test(phone)) {
+      setPhoneError("El teléfono debe tener exactamente 10 dígitos.");
       return;
     }
     if (!trainerId) { setTrainerError("Seleccioná un entrenador."); return; }
@@ -146,7 +154,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
             placeholder="Número de documento"
             withAsterisk
             value={document}
-            onChange={(event) => setDocument(event.currentTarget.value)}
+            onChange={(event) => setDocument(event.currentTarget.value.replace(/\D/g, ""))}
             error={documentError ?? undefined}
           />
           <TextInput
@@ -154,7 +162,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
             placeholder="Teléfono de contacto"
             withAsterisk
             value={phone}
-            onChange={(event) => setPhone(event.currentTarget.value)}
+            onChange={(event) => setPhone(event.currentTarget.value.replace(/\D/g, "").slice(0, 10))}
             error={phoneError ?? undefined}
           />
           <Button type="submit" leftSection={<IconDeviceFloppy size={18} />} loading={isSubmitting}>

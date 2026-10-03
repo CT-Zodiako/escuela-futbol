@@ -43,6 +43,13 @@ const DESKTOP_ROW_HEIGHT = 67;
 const DESKTOP_HEADER_HEIGHT = 64;
 const MOBILE_CARD_HEIGHT = 288;
 
+// Display-only formatting: the stored document stays raw digits for search and writes.
+function formatDocument(document: string | null | undefined): string {
+  const value = document ?? "";
+  if (!/^\d+$/.test(value)) return value || "—";
+  return value.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
 export function DashboardPage() {
   const { signOut } = useAuth();
   const isNarrowScreen = useMediaQuery("(max-width: 640px)");
@@ -306,7 +313,7 @@ export function DashboardPage() {
                         </Badge>
                       </Group>
                       <Text size="sm" c="dimmed">
-                        Documento: {student.document ?? "—"}
+                        Documento: {formatDocument(student.document)}
                       </Text>
                       <Text size="sm" c="dimmed">
                         Teléfono: {student.phone ?? "—"}
@@ -373,7 +380,7 @@ export function DashboardPage() {
                       <Table.Td>
                         {student.name}
                       </Table.Td>
-                      <Table.Td>{student.document ?? "—"}</Table.Td>
+                      <Table.Td>{formatDocument(student.document)}</Table.Td>
                       <Table.Td>{student.phone ?? "—"}</Table.Td>
                       <Table.Td>{trainerNameFor(student)}</Table.Td>
                       <Table.Td>

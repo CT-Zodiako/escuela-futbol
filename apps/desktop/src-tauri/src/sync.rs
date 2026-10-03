@@ -315,12 +315,23 @@ fn merge_student_outbox(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn valid_student_identity(document: Option<&str>, phone: Option<&str>) -> bool {
+    let document_ok = document.map_or(false, |value| {
+        let value = value.trim();
+        !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+    });
+    let phone_ok = phone.map_or(false, |value| {
+        let value = value.trim();
+        value.len() == 10 && value.bytes().all(|byte| byte.is_ascii_digit())
+    });
+    document_ok && phone_ok
+}
+
 fn enqueue_student_local(conn: &mut Connection, mut student: Student) -> Result<Student> {
     if !valid_uuid(&student.id) || student.id != student.id.to_lowercase()
         || student.client_mutation_id.as_deref() != Some(student.id.as_str())
         || student.name.trim().is_empty()
-        || student.document.as_deref().map_or(true, |v| v.trim().is_empty())
-        || student.phone.as_deref().map_or(true, |v| v.trim().is_empty())
+        || !valid_student_identity(student.document.as_deref(), student.phone.as_deref())
         || !valid_date(&format!("{}-01", student.activation_month)) {
         return Err("Datos de estudiante inválidos.".into());
     }
@@ -1180,6 +1191,42 @@ mod tests {
         let student = visible.iter().find(|s| s.id == MUTATION_ID).unwrap();
         assert_eq!(student.name, "Updated on server");
         assert!(!student.is_active);
+    }
+
+    #[test]
+    fn student_identity_rejects_non_digit_documents_and_wrong_phone_shapes() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        for case in 0..9 {
+            let mut student = offline_student();
+            match case {
+                0 => student.document = Some("1030 456 789".into()),
+                1 => student.document = Some("1.030.456.789".into()),
+                2 => student.document = Some("1030-456-789".into()),
+                3 => student.document = Some("doc103045".into()),
+                4 => student.document = Some("1030456789a".into()),
+                5 => student.phone = Some("30012345".into()),
+                6 => student.phone = Some("300123456".into()),
+                7 => student.phone = Some("30012345678".into()),
+                _ => student.phone = Some("300-123-4567".into()),
+            }
+            assert!(enqueue_student_local(&mut conn, student).is_err(), "case {case}");
+        }
+        assert!(local_students(&conn).unwrap().is_empty());
+        assert!(pending_students(&conn).unwrap().is_empty());
+        // Digits-only documents of any length and exactly 10-digit phones pass.
+        for case in 0..3 {
+            let mut student = offline_student();
+            match case {
+                0 => student.document = Some("7".into()),
+                1 => student.document = Some("123456".into()),
+                _ => student.phone = Some("0300123456".into()),
+            }
+            let saved = enqueue_student_local(&mut conn, student).unwrap();
+            assert!(saved.document.as_deref().unwrap().bytes().all(|b| b.is_ascii_digit()));
+            assert_eq!(saved.phone.as_deref().unwrap().len(), 10);
+        }
     }
 
     #[test]
