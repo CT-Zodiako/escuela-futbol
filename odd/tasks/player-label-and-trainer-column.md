@@ -17,4 +17,4 @@ Show each player's trainer in the initial roster and use “Jugador” instead o
 - Trainer IDs already exist on Student records and trainers are available through `api.listTrainers()` for both web and desktop.
 - This change intentionally does not rename database tables, API fields, or internal code symbols.
 - Validation: `cd apps/web && npm run build` passed (`tsc -b` + Vite build). `grep -i estudiante apps/web/src` found no matches.
-- Delivery: committed in `b6986e3` (`feat(reports): add trainer roster and Excel export`).
+- Delivery: committed in `8d6082e` (`feat(reports): add trainer roster and Excel export`).

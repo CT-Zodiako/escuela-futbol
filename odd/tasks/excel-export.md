@@ -17,4 +17,4 @@ Export payment reports as a real Excel workbook instead of CSV.
 - The existing export endpoint returns semicolon-delimited CSV and must be replaced, not merely renamed.
 - Preserve the current report columns and Spanish headings.
 - Validation: API tests passed (52/52), `pnpm build:api` passed, and `pnpm build:web` passed with one pre-existing Vite chunking warning.
-- Delivery: committed in `b6986e3` (`feat(reports): add trainer roster and Excel export`).
+- Delivery: committed in `8d6082e` (`feat(reports): add trainer roster and Excel export`).
