@@ -1,3 +1,4 @@
+import ExcelJS from "exceljs";
 import { admin as desktopAdmin, desktop, isDesktop } from "./desktop";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
@@ -110,6 +111,20 @@ export interface ReportSummary {
   paidStudents: ReportPaidStudent[];
 }
 
+export interface GeneralReportStudent {
+  studentId: string;
+  name: string;
+  months: number[];
+  totalPaid: number;
+}
+
+export interface GeneralReport {
+  year: number;
+  students: GeneralReportStudent[];
+  monthlyTotals: number[];
+  totalCollected: number;
+}
+
 export interface CreatePaymentInput {
   studentId: string;
   receiptNumber?: number;
@@ -160,6 +175,31 @@ export const api = {
     request<ReportSummary>(
       `/api/reports/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${trainerId ? `&trainerId=${encodeURIComponent(trainerId)}` : ""}`,
     ),
+  getGeneralReport: (year: number, trainerId?: string) =>
+    isDesktop ? invokeOrApiError(desktop.generalReport(year, trainerId)) :
+    request<GeneralReport>(`/api/reports/general?year=${year}${trainerId ? `&trainerId=${encodeURIComponent(trainerId)}` : ""}`),
+  exportGeneralReport: async (year: number, trainerId?: string): Promise<Blob> => {
+    if (isDesktop) {
+      const report = await invokeOrApiError(desktop.generalReport(year, trainerId));
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Informe general");
+      const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+      worksheet.addRow(["Jugador", ...monthNames, "Total pagado"]);
+      worksheet.getRow(1).font = { bold: true };
+      report.students.forEach((student) => worksheet.addRow([student.name, ...student.months, student.totalPaid]));
+      worksheet.addRow(["TOTAL POR MES", ...report.monthlyTotals, report.totalCollected]);
+      worksheet.getRow(worksheet.rowCount).font = { bold: true };
+      worksheet.columns = [{ width: 30 }, ...monthNames.map(() => ({ width: 14 })), { width: 16 }];
+      const buffer = await workbook.xlsx.writeBuffer();
+      return new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    }
+    const token = getToken();
+    const response = await fetch(`${API_URL}/api/reports/general/export?year=${year}${trainerId ? `&trainerId=${encodeURIComponent(trainerId)}` : ""}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!response.ok) throw new ApiError("No se pudo exportar el informe general.");
+    return response.blob();
+  },
   createStudent: async (data: {
     trainerId: string;
     name: string;

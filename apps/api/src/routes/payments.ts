@@ -36,6 +36,23 @@ export async function paymentRoutes(app: FastifyInstance) {
       const student = await tx.student.findUnique({ where: { id: parsed.data.studentId } });
       if (!student) return { status: 404, body: { message: "Estudiante no encontrado." } };
 
+      // One payment per student per calendar month; the paymentDate month is
+      // the covered month. The counter is not touched on a duplicate.
+      const [year, month] = parsed.data.paymentDate.split("-").map(Number);
+      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+      const nextMonthStart = month === 12
+        ? `${year + 1}-01-01`
+        : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+      const duplicate = await tx.payment.findFirst({
+        where: {
+          studentId: parsed.data.studentId,
+          paymentDate: { gte: new Date(monthStart), lt: new Date(nextMonthStart) },
+        },
+      });
+      if (duplicate) {
+        return { status: 409, body: { message: "El estudiante ya tiene un pago registrado en ese mes." } };
+      }
+
       const [counter] = await tx.$queryRaw<{ value: number }[]>`
         UPDATE "receipt_counter" SET "value" = "value" + 1 WHERE "id" = 1 RETURNING "value"`;
       if (!counter) throw new Error("Receipt counter is missing");

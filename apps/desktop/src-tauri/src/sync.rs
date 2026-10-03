@@ -201,7 +201,13 @@ fn initialize(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS admin_sessions (
             token_hash TEXT PRIMARY KEY NOT NULL,
             admin_id TEXT NOT NULL REFERENCES admins(id),
-            created_at TEXT NOT NULL);")
+            created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS receipt_counter (
+            id INTEGER PRIMARY KEY CHECK(id = 1), next_number INTEGER NOT NULL);")
+        .map_err(|e| e.to_string())?;
+    // The counter row is created once and never reset: reinitialization and the
+    // one-time data resets below must not reuse already-issued receipt numbers.
+    conn.execute("INSERT OR IGNORE INTO receipt_counter(id, next_number) VALUES (1, 1)", [])
         .map_err(|e| e.to_string())?;
     apply_one_time_resets(conn)
 }
@@ -268,6 +274,14 @@ fn replace(conn: &mut Connection, snapshot: Snapshot) -> Result<()> {
         tx.execute("INSERT INTO payments(id, student_id, payment_date, payload) VALUES (?1, ?2, ?3, ?4)",
             params![payment.id, payment.student_id, payment.payment_date, payload]).map_err(|e| e.to_string())?;
     }
+    // Imported receipts seed the local sequence at the highest number already
+    // issued, both in snapshot rows and acknowledged outbox bridge rows, so a
+    // fresh snapshot can never reissue an existing number. MAX keeps the
+    // counter monotonic when a snapshot carries older receipts.
+    tx.execute("UPDATE receipt_counter SET next_number = MAX(next_number,
+            COALESCE((SELECT MAX(COALESCE(json_extract(payload, '$.receiptNumber'), 0)) FROM payments), 0) + 1,
+            COALESCE((SELECT MAX(COALESCE(json_extract(payload, '$.receiptNumber'), 0)) FROM payment_outbox), 0) + 1)
+        WHERE id = 1", []).map_err(|e| e.to_string())?;
     tx.execute("INSERT INTO sync_state(id, generated_at) VALUES (1, ?1)
         ON CONFLICT(id) DO UPDATE SET generated_at = excluded.generated_at",
         params![snapshot.generated_at]).map_err(|e| e.to_string())?;
@@ -491,16 +505,67 @@ fn enqueue(conn: &Connection, mut payment: Payment) -> Result<Payment> {
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM students WHERE id = ?1)",
         [&payment.student_id], |row| row.get(0)).map_err(|e| e.to_string())?;
     if !exists { return Err("Estudiante no encontrado en los datos locales.".into()); }
+    // One payment per student per calendar month: the paymentDate month is the
+    // covered month. This pre-transaction check is only a fast path; it cannot
+    // close a write race on its own, so the authoritative check repeats inside
+    // the transaction below. Rows already created by this same
+    // clientMutationId are excluded so idempotent re-enqueue retries still
+    // return the stored payment instead of colliding with themselves.
+    let month = payment.payment_date[..7].to_string();
+    let duplicate: bool = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM payments WHERE student_id = ?1 AND substr(payment_date, 1, 7) = ?2
+                AND id != ?3 AND coalesce(json_extract(payload, '$.clientMutationId'), '') != ?3
+            UNION ALL
+            SELECT 1 FROM payment_outbox WHERE student_id = ?1 AND substr(payment_date, 1, 7) = ?2
+                AND client_mutation_id != ?3)",
+        params![payment.student_id, month, payment.id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    if duplicate { return Err("El estudiante ya tiene un pago registrado en ese mes.".into()); }
     payment.receipt_number = None;
     // Local-only: the row is final once committed, so there is no pending state.
     payment.sync_status = None;
     let payload = serde_json::to_string(&payment).map_err(|e| e.to_string())?;
-    conn.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
+    // Reserve the outbox row first; the shared counter is bumped only when this
+    // transaction owns a brand-new row, so duplicate clientMutationId retries
+    // (even from a concurrent connection) return the stored payload without
+    // consuming a number. Reservation, allocation, and payload write commit as
+    // one transaction, so concurrent writers can never reuse a number.
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let inserted = tx.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
         VALUES (?1, ?2, ?3, ?4) ON CONFLICT(client_mutation_id) DO NOTHING",
         params![payment.id, payment.student_id, payment.payment_date, payload]).map_err(|e| e.to_string())?;
-    let saved: String = conn.query_row("SELECT payload FROM payment_outbox WHERE client_mutation_id = ?1",
+    let stored: String = tx.query_row("SELECT payload FROM payment_outbox WHERE client_mutation_id = ?1",
         [&payment.id], |row| row.get(0)).map_err(|e| e.to_string())?;
-    serde_json::from_str(&saved).map_err(|e| e.to_string())
+    let mut saved: Payment = serde_json::from_str(&stored).map_err(|e| e.to_string())?;
+    if inserted != 0 && saved.receipt_number.is_none() {
+        // Authoritative one-payment-per-month check, repeated inside the
+        // transaction: a concurrent writer that commits between the
+        // pre-transaction check and this insert is visible here, so two local
+        // writers can never register the same month. The `inserted != 0` gate
+        // keeps idempotent retries of an existing clientMutationId on the
+        // return-stored-payload path. Returning early drops the transaction,
+        // so the duplicate attempt rolls back: no outbox row survives and no
+        // receipt number is consumed.
+        let duplicate: bool = tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM payments WHERE student_id = ?1 AND substr(payment_date, 1, 7) = ?2
+                    AND id != ?3 AND coalesce(json_extract(payload, '$.clientMutationId'), '') != ?3
+                UNION ALL
+                SELECT 1 FROM payment_outbox WHERE student_id = ?1 AND substr(payment_date, 1, 7) = ?2
+                    AND client_mutation_id != ?3)",
+            params![payment.student_id, month, payment.id], |row| row.get(0)).map_err(|e| e.to_string())?;
+        if duplicate { return Err("El estudiante ya tiene un pago registrado en ese mes.".into()); }
+        tx.execute("UPDATE receipt_counter SET next_number = next_number + 1 WHERE id = 1", [])
+            .map_err(|e| e.to_string())?;
+        let number: i64 = tx.query_row("SELECT next_number - 1 FROM receipt_counter WHERE id = 1", [],
+            |row| row.get(0)).map_err(|e| e.to_string())?;
+        saved.receipt_number = Some(number);
+        let payload = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE payment_outbox SET payload = ?1 WHERE client_mutation_id = ?2",
+            params![payload, payment.id]).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(saved)
 }
 
 fn pending(conn: &Connection) -> Result<Vec<Payment>> {
@@ -585,6 +650,24 @@ pub struct PendingReport {
     paid_count: usize,
     pending_count: usize,
     students: Vec<PendingStudentReport>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneralReportStudent {
+    student_id: String,
+    name: String,
+    months: [i64; 12],
+    total_paid: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneralReport {
+    year: i64,
+    students: Vec<GeneralReportStudent>,
+    monthly_totals: [i64; 12],
+    total_collected: i64,
 }
 
 fn validate_payment_update(update: &PaymentUpdate) -> Result<()> {
@@ -757,6 +840,53 @@ fn pending_report_local(conn: &Connection, month: &str) -> Result<PendingReport>
     })
 }
 
+fn validate_report_year(year: i64, trainer_id: Option<&str>) -> Result<()> {
+    if !(1000..=9999).contains(&year) {
+        return Err("El año debe tener formato AAAA.".into());
+    }
+    if trainer_id.map_or(false, |id| !valid_uuid(id)) {
+        return Err("Entrenador inválido.".into());
+    }
+    Ok(())
+}
+
+// Annual grid mirroring the server report: every student of the (optional)
+// trainer appears, even with no payments, and every visible payment lands in
+// the column of its calendar month.
+fn general_report_local(conn: &Connection, year: i64, trainer_id: Option<&str>) -> Result<GeneralReport> {
+    validate_report_year(year, trainer_id)?;
+    let from = format!("{year:04}-01-01");
+    let to = format!("{year:04}-12-31");
+    let students: Vec<Student> = local_students(conn)?.into_iter()
+        .filter(|student| trainer_id.map_or(true, |id| student.trainer_id.as_deref() == Some(id)))
+        .collect();
+    let mut months_by_student: HashMap<String, [i64; 12]> = students.iter()
+        .map(|student| (student.id.clone(), [0i64; 12])).collect();
+    for payment in all_visible_payments(conn)? {
+        let Some(date) = date_prefix(&payment.payment_date) else { continue; };
+        if date < from.as_str() || date > to.as_str() { continue; }
+        let Some(months) = months_by_student.get_mut(&payment.student_id) else { continue; };
+        // date_prefix guarantees a valid calendar date, so the month is 01-12.
+        let month: usize = date[5..7].parse().map_err(|_| "Fecha de pago inválida.".to_string())?;
+        months[month - 1] += payment.amount;
+    }
+    let mut monthly_totals = [0i64; 12];
+    let rows = students.iter().map(|student| {
+        let months = months_by_student[&student.id];
+        for (index, amount) in months.iter().enumerate() {
+            monthly_totals[index] += amount;
+        }
+        GeneralReportStudent {
+            student_id: student.id.clone(),
+            name: student.name.clone(),
+            months,
+            total_paid: months.iter().sum(),
+        }
+    }).collect();
+    let total_collected = monthly_totals.iter().sum();
+    Ok(GeneralReport { year, students: rows, monthly_totals, total_collected })
+}
+
 fn csv_cell(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
@@ -798,6 +928,29 @@ fn export_payments_local(conn: &Connection, from: &str, to: &str, trainer_id: Op
     Ok(csv)
 }
 
+// Local-safe counterpart of the server XLSX general export: same grid (player,
+// twelve month columns, paid total, monthly totals row) as CSV with a UTF-8
+// BOM so Excel renders the Spanish month names correctly.
+const MONTH_NAMES: [&str; 12] = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+fn export_general_report_local(conn: &Connection, year: i64, trainer_id: Option<&str>) -> Result<String> {
+    let report = general_report_local(conn, year, trainer_id)?;
+    let mut csv = String::from("\u{FEFF}");
+    csv.push_str("Jugador");
+    for name in MONTH_NAMES { csv.push_str(&format!(",{name}")); }
+    csv.push_str(",Total pagado\n");
+    for student in &report.students {
+        csv.push_str(&csv_cell(&student.name));
+        for amount in student.months { csv.push_str(&format!(",{amount}")); }
+        csv.push_str(&format!(",{}\n", student.total_paid));
+    }
+    csv.push_str("TOTAL POR MES");
+    for amount in report.monthly_totals { csv.push_str(&format!(",{amount}")); }
+    csv.push_str(&format!(",{}\n", report.total_collected));
+    Ok(csv)
+}
+
 #[tauri::command]
 pub fn update_local_payment(app: tauri::AppHandle, id: String, update: PaymentUpdate) -> Result<Payment> {
     update_payment_local(&open(&app)?, &id, &update)
@@ -821,6 +974,16 @@ pub fn local_pending_report(app: tauri::AppHandle, month: String) -> Result<Pend
 #[tauri::command]
 pub fn export_local_payments(app: tauri::AppHandle, from: String, to: String, trainer_id: Option<String>) -> Result<String> {
     export_payments_local(&open(&app)?, &from, &to, trainer_id.as_deref())
+}
+
+#[tauri::command]
+pub fn local_payment_general_report(app: tauri::AppHandle, year: i64, trainer_id: Option<String>) -> Result<GeneralReport> {
+    general_report_local(&open(&app)?, year, trainer_id.as_deref())
+}
+
+#[tauri::command]
+pub fn export_local_general_report(app: tauri::AppHandle, year: i64, trainer_id: Option<String>) -> Result<String> {
+    export_general_report_local(&open(&app)?, year, trainer_id.as_deref())
 }
 
 // Local-only administrator accounts. SQLite is the source of truth for desktop
@@ -1074,6 +1237,13 @@ mod tests {
         payment
     }
 
+    fn second_local_payment() -> Payment {
+        let mut payment = local_payment();
+        payment.id = "c3f1a2c4-1111-4b2b-9c3d-1234567890ac".into();
+        payment.client_mutation_id = Some(payment.id.clone());
+        payment
+    }
+
     fn offline_trainer() -> Trainer {
         Trainer { id: SERVER_ID.into(), client_mutation_id: Some(SERVER_ID.into()),
             name: " Trainer ".into(), sync_status: None }
@@ -1288,7 +1458,9 @@ mod tests {
         replace(&mut conn, local_snapshot()).unwrap();
         let saved = enqueue(&conn, local_payment()).unwrap();
         assert_eq!(saved.sync_status.as_deref(), None);
-        assert_eq!(saved.receipt_number, None);
+        // Local payments now carry sequential receipt numbers; the imported
+        // receipt 42 seeds this one at 43.
+        assert_eq!(saved.receipt_number, Some(43));
         enqueue(&conn, local_payment()).unwrap();
         initialize(&conn).unwrap(); // additive migration must preserve both tables
         assert_eq!(pending(&conn).unwrap().len(), 1);
@@ -1390,6 +1562,198 @@ mod tests {
             assert!(enqueue(&conn, payment).is_err());
         }
         assert!(pending(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn first_local_payment_gets_receipt_number_one() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.payments.clear();
+        replace(&mut conn, snapshot).unwrap();
+        let saved = enqueue(&conn, local_payment()).unwrap();
+        assert_eq!(saved.receipt_number, Some(1));
+    }
+
+    #[test]
+    fn second_local_payment_gets_the_next_receipt_number() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.payments.clear();
+        replace(&mut conn, snapshot).unwrap();
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(1));
+        // Same student, different month: the rule allows it and the receipt
+        // sequence continues.
+        let mut next_month = second_local_payment();
+        next_month.payment_date = "2026-03-01".into();
+        let saved = enqueue(&conn, next_month).unwrap();
+        assert_eq!(saved.receipt_number, Some(2));
+        assert_eq!(pending(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn idempotent_reenqueue_does_not_consume_a_receipt_number() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.payments.clear();
+        replace(&mut conn, snapshot).unwrap();
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(1));
+        // Re-enqueueing the same client mutation id returns the stored row.
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(1));
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+        // The skipped number is not consumed: the next new payment takes it.
+        // It covers a different month, so the one-payment-per-month rule allows it.
+        let mut next_month = second_local_payment();
+        next_month.payment_date = "2026-03-01".into();
+        assert_eq!(enqueue(&conn, next_month).unwrap().receipt_number, Some(2));
+        assert_eq!(pending(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn duplicate_month_payment_is_rejected_for_the_same_student() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        // The synced snapshot already covers 2026-01 for STUDENT_ID (receipt 42).
+        replace(&mut conn, local_snapshot()).unwrap();
+        let saved = enqueue(&conn, local_payment()).unwrap();
+        assert_eq!(saved.receipt_number, Some(43));
+        // The same student cannot pay the same month twice, even with a new
+        // client mutation id (this is not an idempotent retry).
+        let err = enqueue(&conn, second_local_payment()).unwrap_err();
+        assert!(err.contains("mes"), "unexpected error: {err}");
+        // A month already covered by a synced payment cannot be paid again.
+        let mut january = second_local_payment();
+        january.payment_date = "2026-01-20".into();
+        assert!(enqueue(&conn, january).is_err());
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+        // The rejected attempts never consumed a receipt number.
+        let mut march = second_local_payment();
+        march.payment_date = "2026-03-01".into();
+        assert_eq!(enqueue(&conn, march).unwrap().receipt_number, Some(44));
+    }
+
+    #[test]
+    fn concurrent_duplicate_month_writer_rolls_back_without_a_receipt() {
+        // The pre-transaction duplicate check cannot see a concurrent writer's
+        // uncommitted row, so only the in-transaction check can stop a
+        // duplicate month. A second connection reserves the same month while
+        // its transaction is still open; the local enqueue must then fail,
+        // roll back, and leave the receipt counter untouched.
+        let dir = std::env::temp_dir().join(format!("escuela-sync-test-{}", uuid_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sync.sqlite3");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            initialize(&conn).unwrap();
+            replace(&mut conn, local_snapshot()).unwrap();
+        }
+        // Open and initialize the contending connection before the writer
+        // holds the lock: initialize runs DDL that would otherwise block on
+        // the writer's transaction and delay the pre-transaction check past
+        // the commit.
+        let conn_b = Connection::open(&path).unwrap();
+        initialize(&conn_b).unwrap();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+        let path_for_writer = path.clone();
+        let writer = std::thread::spawn(move || {
+            let conn = Connection::open(&path_for_writer).unwrap();
+            initialize(&conn).unwrap();
+            let tx = conn.unchecked_transaction().unwrap();
+            let mut payment = local_payment();
+            payment.id = SERVER_ID.into();
+            payment.client_mutation_id = Some(SERVER_ID.into());
+            let payload = serde_json::to_string(&payment).unwrap();
+            tx.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
+                VALUES (?1, ?2, ?3, ?4)",
+                params![SERVER_ID, STUDENT_ID, payment.payment_date, payload]).unwrap();
+            ready_tx.send(()).unwrap();
+            // Hold the write lock long enough for the enqueue below to pass
+            // its pre-transaction check and block on this row's lock.
+            std::thread::sleep(std::time::Duration::from_millis(2000));
+            tx.commit().unwrap();
+        });
+        ready_rx.recv().unwrap();
+        // The concurrent row is still uncommitted here, so the fast-path check
+        // passes and only the in-transaction check can reject this payment.
+        let err = enqueue(&conn_b, local_payment()).unwrap_err();
+        assert!(err.contains("mes"), "unexpected error: {err}");
+        writer.join().unwrap();
+        // The duplicate attempt rolled back: exactly one outbox row survives
+        // (the concurrent writer's) and no receipt number was consumed, so the
+        // counter stays seeded at 43 by the imported receipt 42.
+        assert_eq!(count_rows(&conn_b, "payment_outbox"), 1);
+        let mutation: String = conn_b.query_row("SELECT client_mutation_id FROM payment_outbox",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(mutation, SERVER_ID);
+        let next: i64 = conn_b.query_row("SELECT next_number FROM receipt_counter WHERE id = 1",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(next, 43);
+        drop(conn_b);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn payments_for_adjacent_months_are_accepted() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap(); // 2026-01 already paid
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(43)); // 2026-02
+        let mut next_month = second_local_payment();
+        next_month.payment_date = "2026-03-05".into();
+        assert_eq!(enqueue(&conn, next_month).unwrap().receipt_number, Some(44));
+        let mut previous_month = local_payment();
+        previous_month.id = "c3f1a2c4-1111-4b2b-9c3d-1234567890ad".into();
+        previous_month.client_mutation_id = Some(previous_month.id.clone());
+        previous_month.payment_date = "2025-12-15".into();
+        assert_eq!(enqueue(&conn, previous_month).unwrap().receipt_number, Some(45));
+        assert_eq!(pending(&conn).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn another_student_can_pay_in_the_same_month() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.students.push(serde_json::from_value(serde_json::json!({
+            "id": "e3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+            "name": "Second student", "document": null, "phone": null,
+            "isActive": true, "activationMonth": "2026-01" })).unwrap());
+        replace(&mut conn, snapshot).unwrap();
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(43));
+        // Same month, different student: allowed.
+        let mut other = second_local_payment();
+        other.student_id = "e3f1a2c4-1111-4b2b-9c3d-1234567890ab".into();
+        assert_eq!(enqueue(&conn, other).unwrap().receipt_number, Some(44));
+        // The rule stays scoped per student: the first student still cannot repeat.
+        assert!(enqueue(&conn, second_local_payment()).is_err());
+        assert_eq!(pending(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn imported_receipts_seed_the_local_sequence() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        // The snapshot payment already holds receipt 42, so the next local
+        // payment continues from 43.
+        let saved = enqueue(&conn, local_payment()).unwrap();
+        assert_eq!(saved.receipt_number, Some(43));
+    }
+
+    #[test]
+    fn reinitialization_preserves_the_receipt_counter() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(43));
+        // Additive migrations must not reset the sequence or reuse issued numbers.
+        initialize(&conn).unwrap();
+        let mut next_month = second_local_payment();
+        next_month.payment_date = "2026-03-01".into();
+        let saved = enqueue(&conn, next_month).unwrap();
+        assert_eq!(saved.receipt_number, Some(44));
     }
 
     #[test]
@@ -1646,6 +2010,80 @@ mod tests {
         let filtered = export_payments_local(&conn, "2026-03-01", "2026-03-31", None).unwrap();
         assert!(!filtered.contains("01/02/2026"));
         assert!(export_payments_local(&conn, "bad", "2026-01-01", None).is_err());
+    }
+
+    #[test]
+    fn general_report_buckets_payments_by_month_and_filters_by_trainer() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.students[0].trainer_id = Some(SERVER_ID.into());
+        snapshot.students.push(serde_json::from_value(serde_json::json!({
+            "id": "e3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+            "name": "Second student", "document": null, "phone": null,
+            "isActive": true, "activationMonth": "2026-01" })).unwrap());
+        snapshot.payments[0].payment_date = "2026-01-15T00:00:00.000Z".into();
+        snapshot.payments.push(serde_json::from_value(serde_json::json!({
+            "id": "f3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+            "studentId": "e3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+            "receiptNumber": 44,
+            "paymentDate": "2026-03-20T00:00:00.000Z", "amount": 300,
+            "method": "cash", "concept": "Mensualidad", "note": null })).unwrap());
+        replace(&mut conn, snapshot).unwrap();
+        // A pending offline payment joins the grid without duplicating rows.
+        let mut pending_payment = local_payment();
+        pending_payment.student_id = STUDENT_ID.into();
+        enqueue(&conn, pending_payment).unwrap();
+        let report = general_report_local(&conn, 2026, None).unwrap();
+        assert_eq!(report.year, 2026);
+        assert_eq!(report.students.len(), 2);
+        assert_eq!(report.students[0].name, "Second student");
+        assert_eq!(report.students[0].months[2], 300);
+        assert_eq!(report.students[0].total_paid, 300);
+        let student = report.students.iter().find(|row| row.student_id == STUDENT_ID).unwrap();
+        // 100 in January (snapshot) plus 100 in February (pending offline).
+        assert_eq!(student.months[0], 100);
+        assert_eq!(student.months[1], 100);
+        assert_eq!(student.months[2], 0);
+        assert_eq!(student.total_paid, 200);
+        assert_eq!(report.monthly_totals[0], 100);
+        assert_eq!(report.monthly_totals[1], 100);
+        assert_eq!(report.monthly_totals[2], 300);
+        assert_eq!(report.total_collected, 500);
+        // Trainer filter keeps only that trainer's students.
+        let by_trainer = general_report_local(&conn, 2026, Some(SERVER_ID)).unwrap();
+        assert_eq!(by_trainer.students.len(), 1);
+        assert_eq!(by_trainer.students[0].student_id, STUDENT_ID);
+        assert_eq!(by_trainer.total_collected, 200);
+        // Other years and invalid input are rejected or empty.
+        let other_year = general_report_local(&conn, 2025, None).unwrap();
+        assert_eq!(other_year.total_collected, 0);
+        assert_eq!(other_year.students.len(), 2);
+        assert!(general_report_local(&conn, 999, None).is_err());
+        assert!(general_report_local(&conn, 10000, None).is_err());
+        assert!(general_report_local(&conn, 2026, Some("bad")).is_err());
+    }
+
+    #[test]
+    fn export_general_report_matches_the_annual_grid_and_escapes_names() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.students[0].name = "Doe, John".into();
+        snapshot.payments[0].payment_date = "2026-12-31T00:00:00.000Z".into();
+        replace(&mut conn, snapshot).unwrap();
+        let csv = export_general_report_local(&conn, 2026, None).unwrap();
+        assert!(csv.starts_with('\u{FEFF}'));
+        assert!(csv.contains("Jugador,Enero,Febrero,Marzo,Abril,Mayo,Junio,Julio,Agosto,Septiembre,Octubre,Noviembre,Diciembre,Total pagado"));
+        assert!(csv.contains("\"Doe, John\",0,0,0,0,0,0,0,0,0,0,0,100,100"));
+        assert!(csv.contains("TOTAL POR MES,0,0,0,0,0,0,0,0,0,0,0,100,100"));
+        // One-payment-per-month keeps December a single 100 column.
+        assert!(!csv.contains(",200,200"));
+        let other_year = export_general_report_local(&conn, 2025, None).unwrap();
+        assert!(other_year.contains("TOTAL POR MES,0,0,0,0,0,0,0,0,0,0,0,0,0"));
+        assert!(export_general_report_local(&conn, 999, None).is_err());
+        assert!(export_general_report_local(&conn, 2026, Some("bad")).is_err());
     }
 
     #[test]

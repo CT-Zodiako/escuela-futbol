@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import ExcelJS from "exceljs";
 import { prisma } from "../db.js";
-import { dateRangeSchema, monthQuerySchema } from "../validation.js";
+import { dateRangeSchema, monthQuerySchema, reportYearSchema } from "../validation.js";
 import { monthRange } from "../month.js";
 
 export async function reportRoutes(app: FastifyInstance) {
@@ -64,6 +64,46 @@ export async function reportRoutes(app: FastifyInstance) {
     };
   });
 
+  app.get("/api/reports/general", async (request, reply) => {
+    const parsed = reportYearSchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        message: parsed.error.issues[0]?.message ?? "Año inválido.",
+      });
+    }
+
+    const year = Number(parsed.data.year);
+    const from = new Date(Date.UTC(year, 0, 1));
+    const to = new Date(Date.UTC(year + 1, 0, 1));
+    const students = await prisma.student.findMany({
+      where: parsed.data.trainerId ? { trainerId: parsed.data.trainerId } : undefined,
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    });
+    const payments = await prisma.payment.findMany({
+      where: {
+        paymentDate: { gte: from, lt: to },
+        ...(parsed.data.trainerId ? { student: { trainerId: parsed.data.trainerId } } : {}),
+      },
+      select: { studentId: true, paymentDate: true, amount: true },
+    });
+
+    const byStudent = new Map<string, number[]>();
+    for (const student of students) byStudent.set(student.id, Array(12).fill(0));
+    for (const payment of payments) {
+      const months = byStudent.get(payment.studentId);
+      if (!months) continue;
+      months[payment.paymentDate.getUTCMonth()] += payment.amount;
+    }
+    const monthlyTotals = Array(12).fill(0) as number[];
+    const rows = students.map((student) => {
+      const months = byStudent.get(student.id)!;
+      months.forEach((amount, index) => { monthlyTotals[index] += amount; });
+      return { studentId: student.id, name: student.name, months, totalPaid: months.reduce((sum, amount) => sum + amount, 0) };
+    });
+    return { year, students: rows, monthlyTotals, totalCollected: monthlyTotals.reduce((sum, amount) => sum + amount, 0) };
+  });
+
   app.get("/api/reports/pending", async (request, reply) => {
     const parsed = monthQuerySchema.safeParse(request.query);
     if (!parsed.success) {
@@ -98,6 +138,47 @@ export async function reportRoutes(app: FastifyInstance) {
       pendingCount: results.filter((r) => r.status === "pending").length,
       students: results,
     };
+  });
+
+  app.get("/api/reports/general/export", async (request, reply) => {
+    const parsed = reportYearSchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ message: parsed.error.issues[0]?.message ?? "Año inválido." });
+    }
+    const year = Number(parsed.data.year);
+    const from = new Date(Date.UTC(year, 0, 1));
+    const to = new Date(Date.UTC(year + 1, 0, 1));
+    const [students, payments] = await Promise.all([
+      prisma.student.findMany({
+        where: parsed.data.trainerId ? { trainerId: parsed.data.trainerId } : undefined,
+        orderBy: { name: "asc" }, select: { id: true, name: true },
+      }),
+      prisma.payment.findMany({
+        where: { paymentDate: { gte: from, lt: to }, ...(parsed.data.trainerId ? { student: { trainerId: parsed.data.trainerId } } : {}) },
+        select: { studentId: true, paymentDate: true, amount: true },
+      }),
+    ]);
+    const totals = new Map<string, number[]>();
+    students.forEach((student) => totals.set(student.id, Array(12).fill(0)));
+    payments.forEach((payment) => totals.get(payment.studentId)?.splice(payment.paymentDate.getUTCMonth(), 1, (totals.get(payment.studentId)?.[payment.paymentDate.getUTCMonth()] ?? 0) + payment.amount));
+    const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Informe general");
+    worksheet.addRow(["Jugador", ...monthNames, "Total pagado"]);
+    worksheet.getRow(1).font = { bold: true };
+    const monthlyTotals = Array(12).fill(0) as number[];
+    for (const student of students) {
+      const months = totals.get(student.id)!;
+      months.forEach((amount, index) => { monthlyTotals[index] += amount; });
+      worksheet.addRow([student.name, ...months, months.reduce((sum, amount) => sum + amount, 0)]);
+    }
+    worksheet.addRow(["TOTAL POR MES", ...monthlyTotals, monthlyTotals.reduce((sum, amount) => sum + amount, 0)]);
+    worksheet.getRow(worksheet.rowCount).font = { bold: true };
+    worksheet.columns = [{ width: 30 }, ...monthNames.map(() => ({ width: 14 })), { width: 16 }];
+    const buffer = await workbook.xlsx.writeBuffer();
+    reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    reply.header("Content-Disposition", `attachment; filename="informe-general-${year}.xlsx"`);
+    return reply.send(Buffer.from(buffer));
   });
 
   app.get("/api/reports/export", async (request, reply) => {
