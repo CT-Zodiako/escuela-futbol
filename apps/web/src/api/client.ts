@@ -1,4 +1,4 @@
-import { desktop, isDesktop, notifySync, type Snapshot } from "./desktop";
+import { admin as desktopAdmin, desktop, isDesktop } from "./desktop";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
@@ -17,8 +17,9 @@ export function setToken(token: string | null) {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  if (isDesktop && options.method && options.method !== "GET" && path !== "/api/auth/login"
-    && !(["/api/payments", "/api/students", "/api/trainers"].includes(path) && options.method === "POST")) {
+  // Desktop is local-only: it never issues HTTP mutations. The guard stays so a
+  // desktop build pointed at the dev API fails loudly instead of silently syncing.
+  if (isDesktop && options.method && options.method !== "GET" && path !== "/api/auth/login") {
     throw new ApiError("Este cambio no está disponible en escritorio. Podés registrar jugadores y pagos.");
   }
   const token = getToken();
@@ -119,202 +120,43 @@ export interface CreatePaymentInput {
   note?: string;
 }
 
-let trainersInFlight: Promise<void> | null = null;
-export function syncPendingTrainers(): Promise<void> {
-  if (!isDesktop) return Promise.resolve();
-  if (trainersInFlight) return trainersInFlight;
-  trainersInFlight = (async () => {
-    try {
-      await desktop.initialize();
-      for (;;) {
-        const pending = await desktop.pendingTrainers();
-        if (!pending.length) break;
-        const failures: unknown[] = [];
-        for (const trainer of pending) {
-          try {
-            const saved = await request<Trainer>("/api/trainers", {
-              method: "POST",
-              body: JSON.stringify({ name: trainer.name, clientMutationId: trainer.clientMutationId }),
-            });
-            await desktop.acknowledgeTrainer(trainer.clientMutationId!, saved);
-          } catch (error) { failures.push(error); }
-        }
-        if (failures.length) throw failures[0];
-      }
-    } finally { trainersInFlight = null; }
-  })();
-  return trainersInFlight;
-}
-
-let studentsInFlight: Promise<void> | null = null;
-export function syncPendingStudents(): Promise<void> {
-  if (!isDesktop) return Promise.resolve();
-  if (studentsInFlight) return studentsInFlight;
-  studentsInFlight = (async () => {
-    try {
-      await desktop.initialize();
-      for (;;) {
-        const pending = await desktop.pendingStudents();
-        if (!pending.length) break;
-        const failures: unknown[] = [];
-        for (const student of pending) {
-          try {
-            const saved = await request<Student>("/api/students", {
-              method: "POST",
-              body: JSON.stringify({
-                clientMutationId: student.clientMutationId,
-                name: student.name,
-                document: student.document ?? undefined,
-                phone: student.phone ?? undefined,
-                activationMonth: student.activationMonth,
-                trainerId: student.trainerId,
-              }),
-            });
-            await desktop.acknowledgeStudent(student.clientMutationId!, saved);
-            notifySync(null);
-          } catch (error) {
-            failures.push(error);
-          }
-        }
-        if (failures.length) throw failures[0];
-      }
-      notifySync(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      notifySync(message);
-      throw new ApiError(message);
-    } finally {
-      studentsInFlight = null;
-    }
-  })();
-  return studentsInFlight;
-}
-
-// Students precede their payments, but a rejected student must not starve
-// payments for other students. Both queues retain failures for the next retry.
-async function syncPendingOutboxes(): Promise<void> {
-  const failures: unknown[] = [];
-  try { await syncPendingTrainers(); } catch (error) { failures.push(error); }
-  try { await syncPendingStudents(); } catch (error) { failures.push(error); }
-  try { await syncPendingPayments(); } catch (error) { failures.push(error); }
-  if (failures.length) {
-    const error = failures[0];
-    const message = error instanceof Error ? error.message : String(error);
-    notifySync(message);
-    throw new ApiError(message);
+// Tauri invoke rejects with plain strings; normalize them into ApiError so pages
+// can show the command's safe message (never a password hash).
+async function invokeOrApiError<T>(promise: Promise<T>): Promise<T> {
+  try {
+    return await promise;
+  } catch (error) {
+    throw new ApiError(error instanceof Error ? error.message : String(error ?? "Ocurrió un error inesperado."));
   }
-}
-
-let paymentsInFlight: Promise<void> | null = null;
-export function syncPendingPayments(): Promise<void> {
-  if (!isDesktop) return Promise.resolve();
-  if (paymentsInFlight) return paymentsInFlight;
-  paymentsInFlight = (async () => {
-    try {
-      await desktop.initialize();
-      // Drain again after acknowledgements: another payment may have been queued
-      // while requests were in flight. A lost response leaves the same UUID pending.
-      for (;;) {
-        const pending = await desktop.pendingPayments();
-        if (!pending.length) break;
-        const failures: unknown[] = [];
-        for (const payment of pending) {
-          try {
-            const saved = await request<Payment>("/api/payments", {
-              method: "POST",
-              body: JSON.stringify({
-                clientMutationId: payment.clientMutationId,
-                studentId: payment.studentId,
-                concept: payment.concept,
-                paymentDate: payment.paymentDate,
-                amount: payment.amount,
-                method: payment.method,
-                note: payment.note ?? undefined,
-              }),
-            });
-            await desktop.acknowledgePayment(payment.clientMutationId!, saved);
-            notifySync(null);
-          } catch (error) {
-            // One permanently rejected entry must not starve unrelated payments.
-            failures.push(error);
-          }
-        }
-        if (failures.length) throw failures[0];
-      }
-      notifySync(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      notifySync(message);
-      throw new ApiError(message);
-    } finally {
-      paymentsInFlight = null;
-    }
-  })();
-  return paymentsInFlight;
-}
-
-// Run only while the authenticated dashboard is mounted. A timer also catches
-// recovery when navigator.onLine stays true but the server was unreachable.
-export function startPaymentSync(): () => void {
-  if (!isDesktop) return () => undefined;
-  const retry = () => {
-    if (getToken()) void syncPendingOutboxes().catch(() => undefined);
-  };
-  retry();
-  window.addEventListener("online", retry);
-  const timer = window.setInterval(retry, 30000);
-  return () => {
-    window.removeEventListener("online", retry);
-    window.clearInterval(timer);
-  };
-}
-
-let refreshInFlight: Promise<void> | null = null;
-export function refreshSnapshot(): Promise<void> {
-  if (!isDesktop) return Promise.resolve();
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
-    try {
-      await desktop.initialize();
-      await syncPendingOutboxes();
-      const snapshot = await request<Snapshot>("/api/sync/snapshot");
-      // Fetch trainers separately to remain compatible with the existing snapshot endpoint.
-      const trainers = await request<Trainer[]>("/api/trainers");
-      await desktop.replace({ ...snapshot, trainers });
-      notifySync(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      notifySync(message);
-      throw new ApiError(message);
-    } finally {
-      refreshInFlight = null;
-    }
-  })();
-  return refreshInFlight;
 }
 
 export const api = {
   login: (email: string, password: string) =>
+    isDesktop ? invokeOrApiError(desktopAdmin.login(email, password)) :
     request<{ token: string }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  getSetupStatus: () =>
+    isDesktop ? invokeOrApiError(desktopAdmin.setupStatus()) : Promise.resolve({ needsSetup: false }),
+  createFirstAdmin: (data: { name: string; email: string; password: string }) =>
+    isDesktop ? invokeOrApiError(desktopAdmin.createFirstAdmin(data)) :
+    Promise.reject(new ApiError("La configuración inicial solo está disponible en la aplicación de escritorio.")),
   listTrainers: () => isDesktop ? desktop.trainers() : request<Trainer[]>("/api/trainers"),
   createTrainer: async (data: { name: string }): Promise<Trainer> => {
     const clientMutationId = crypto.randomUUID();
     if (!isDesktop) return request<Trainer>("/api/trainers", {
       method: "POST", body: JSON.stringify({ ...data, clientMutationId }),
     });
+    // Local-only: the row is durable in SQLite on this machine; no network sync.
     await desktop.initialize();
-    const trainer = await desktop.enqueueTrainer({ ...data, id: clientMutationId, clientMutationId });
-    notifySync(null);
-    void syncPendingOutboxes().catch(() => undefined);
-    return trainer;
+    return desktop.enqueueTrainer({ ...data, id: clientMutationId, clientMutationId });
   },
   listStudents: () => isDesktop ? desktop.students() : request<Student[]>("/api/students"),
   listPayments: (studentId: string) => isDesktop ? desktop.payments(studentId) :
     request<Payment[]>(`/api/payments?studentId=${encodeURIComponent(studentId)}`),
   getReportSummary: (from: string, to: string, trainerId?: string) =>
+    isDesktop ? invokeOrApiError(desktop.paymentSummary(from, to, trainerId)) :
     request<ReportSummary>(
       `/api/reports/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${trainerId ? `&trainerId=${encodeURIComponent(trainerId)}` : ""}`,
     ),
@@ -330,17 +172,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...data, clientMutationId }),
     });
+    // Local-only: durable in SQLite immediately; there is no pending/synced state.
     await desktop.initialize();
-    const student = await desktop.enqueueStudent({
+    return desktop.enqueueStudent({
       ...data,
       id: clientMutationId,
       clientMutationId,
       isActive: true,
-      syncStatus: "pending",
     });
-    notifySync(null);
-    void syncPendingOutboxes().catch(() => undefined);
-    return student;
   },
   createPayment: async (data: CreatePaymentInput): Promise<Payment> => {
     const clientMutationId = crypto.randomUUID();
@@ -348,35 +187,42 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...data, clientMutationId }),
     });
+    // Local-only: durable in SQLite immediately; no server receipt assignment.
     await desktop.initialize();
-    const payment = await desktop.enqueuePayment({
+    return desktop.enqueuePayment({
       ...data,
       id: clientMutationId,
       clientMutationId,
       receiptNumber: null,
       note: data.note ?? null,
-      syncStatus: "pending",
     });
-    notifySync(null);
-    void syncPendingOutboxes().catch(() => undefined);
-    return payment;
   },
   updatePayment: (
     id: string,
     data: { concept: string; paymentDate: string; amount: number; method: string; note?: string },
   ) =>
+    isDesktop ? invokeOrApiError(desktop.updatePayment(id, { ...data, note: data.note ?? null })) :
     request<Payment>(`/api/payments/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
   setStudentStatus: (id: string, isActive: boolean) =>
+    isDesktop ? invokeOrApiError(desktop.setStudentStatus(id, isActive)) :
     request<Student>(`/api/students/${encodeURIComponent(id)}/status`, {
       method: "PUT",
       body: JSON.stringify({ isActive }),
     }),
   getPendingReport: (month: string) =>
+    isDesktop ? invokeOrApiError(desktop.pendingReport(month)) :
     request<PendingReport>(`/api/reports/pending?month=${encodeURIComponent(month)}`),
   exportPayments: async (from: string, to: string, trainerId?: string): Promise<Blob> => {
+    // Desktop exports locally as CSV (Excel opens it); the server branch stays
+    // XLSX for development. The Rust command returns the full CSV text with a
+    // UTF-8 BOM, never a network URL or SQL.
+    if (isDesktop) {
+      const csv = await invokeOrApiError(desktop.exportPayments(from, to, trainerId));
+      return new Blob([csv], { type: "text/csv;charset=utf-8" });
+    }
     const token = getToken();
     const response = await fetch(
       `${API_URL}/api/reports/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${trainerId ? `&trainerId=${encodeURIComponent(trainerId)}` : ""}`,

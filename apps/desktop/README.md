@@ -1,8 +1,8 @@
 # Escuela Futbol Desktop
 
-Lightweight Tauri desktop application. The single Windows x64 installation is the only production client; macOS is for development only. The React package is bundled internally by Tauri and is not deployed as a public web application.
+Lightweight Tauri desktop application. The single Windows x64 installation is the only production client; macOS is for development only. The React package (`apps/web`) is bundled internally by Tauri and is never deployed as a public web application.
 
-SQLite is the operational production database on the Windows machine. Railway PostgreSQL/API is the cloud synchronization and backup service, not a separate user interface.
+SQLite is the sole production database on the Windows machine: administrator authentication, trainers, students, payments, reports, and receipt numbering all live in the local SQLite store. There is no hosted API and no cloud database; the desktop bundle is fully self-contained and needs no API URL at build or run time. WhatsApp receipt sharing remains supported (receipt image to the clipboard, WhatsApp opened with a prefilled message).
 
 ## Install on Windows 10 Pro (64-bit)
 
@@ -14,7 +14,7 @@ Microsoft Edge **WebView2 Evergreen Runtime** is required. The installer downloa
 
 The installer installs for the current user and uses Spanish installer text. It is unsigned: Windows SmartScreen may warn about an unrecognized application. Only run installers obtained from a trusted build of this repository.
 
-CI builds on `windows-latest` with the explicit `x86_64-pc-windows-msvc` target and `--bundles nsis`. The bundled frontend uses `https://api-production-28e26.up.railway.app`; changing that URL requires a new build. The installer is uploaded from:
+CI builds on `windows-latest` with the explicit `x86_64-pc-windows-msvc` target and `--bundles nsis`. The bundle is self-contained: no API URL is injected, so any Windows build works without network services. The installer is uploaded from:
 
 ```text
 apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
@@ -26,7 +26,7 @@ The first updater-enabled release must be installed manually over the existing *
 
 In Desktop, select **Actualizaciones** to check GitHub Releases. The panel displays the available version and requires **Confirmar e instalar** before downloading or installing. Save work first: Windows may exit the app as soon as installation begins. Download progress and the verification/install phase are shown; successful installation relaunches the application. Connection, signature, or installation failures are shown without silently installing another artifact.
 
-Updates replace application binaries, not the SQLite database in the application data directory. No database migration, reset, snapshot replacement, or application-data cleanup is added by the updater. Back up production SQLite before the first rollout and verify local records and pending synchronization afterward.
+Updates replace application binaries, not the SQLite database in the application data directory. No database migration, reset, snapshot replacement, or application-data cleanup is added by the updater. Back up production SQLite before the first rollout and verify local records afterward.
 
 ### Publish a release
 
@@ -63,18 +63,14 @@ pnpm dev:desktop
 ```
 
 The shell serves the existing Vite application at `http://localhost:5173`.
-Set `VITE_API_URL` before starting the desktop app when the API is not running at the local default:
-
-```bash
-VITE_API_URL=https://api-production-28e26.up.railway.app pnpm dev:desktop
-```
+No API URL is needed: the desktop app is fully local and never issues HTTP API calls.
 
 ## Build on macOS
 
 From the repository root:
 
 ```bash
-VITE_API_URL=https://api-production-28e26.up.railway.app pnpm build:desktop --config '{"bundle":{"createUpdaterArtifacts":false}}'
+pnpm build:desktop --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
 The default bundle target remains `app`, producing `apps/desktop/src-tauri/target/release/bundle/macos/Escuela Futbol.app` for the Mac's native architecture. Windows CI overrides only the bundle target to NSIS; build each platform on its native operating system. The local override disables updater signing for development without changing the committed config. macOS code signing/notarization and published macOS update artifacts are not configured.

@@ -1,49 +1,10 @@
-import { useEffect, useState } from "react";
-import { Button, Group, Stack, Text } from "@mantine/core";
-import { refreshSnapshot } from "./client";
-import { desktop, syncError, syncEvents } from "./desktop";
+import { Stack, Text } from "@mantine/core";
 
-export function SyncPanel({ onRefresh }: { onRefresh: () => void }) {
-  const [lastSync, setLastSync] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(syncError);
-  const [online, setOnline] = useState(navigator.onLine);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    const update = () => {
-      if (!active) return;
-      setError(syncError);
-      void desktop.status().then((status) => {
-        if (active) setLastSync(status.generatedAt);
-      }).catch((reason) => { if (active) setError(String(reason)); });
-    };
-    const synced = () => { update(); onRefresh(); };
-    const connection = () => setOnline(navigator.onLine);
-    update();
-    syncEvents.addEventListener("change", synced);
-    window.addEventListener("online", connection);
-    window.addEventListener("offline", connection);
-    return () => {
-      active = false;
-      syncEvents.removeEventListener("change", synced);
-      window.removeEventListener("online", connection);
-      window.removeEventListener("offline", connection);
-    };
-  }, [onRefresh]);
-
+// Local-only status panel: the desktop app never synchronizes with a server,
+// so there is no last-sync time, no pending queue, and no refresh action here.
+export function SyncPanel() {
   return <Stack gap="xs">
-    <Group justify="space-between">
-      <Text size="sm">
-        Consulta local · {online ? "Red disponible" : "Sin conexión"} · Última sincronización: {lastSync ? new Date(lastSync).toLocaleString() : "Nunca — descargá los datos en línea"}
-      </Text>
-      <Button loading={busy} disabled={!online} onClick={async () => {
-        setBusy(true);
-        try { await refreshSnapshot(); } catch { /* syncEvents exposes the failure */ }
-        finally { setBusy(false); }
-      }}>Actualizar datos</Button>
-    </Group>
-    <Text size="xs" c="dimmed">Jugadores e historiales se consultan localmente. Los pagos nuevos pueden guardarse sin conexión y se sincronizan al recuperar internet; los reportes requieren conexión.</Text>
-    {error && <Text size="sm" c="red" role="alert">No se pudo sincronizar: {error} Se conserva la última descarga completa.</Text>}
+    <Text size="sm">Modo local · Los datos se guardan en esta computadora.</Text>
+    <Text size="xs" c="dimmed">Jugadores, pagos e historiales se consultan y registran localmente. No se requiere conexión a internet.</Text>
   </Stack>;
 }

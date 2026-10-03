@@ -24,8 +24,7 @@ export function TrainerFormModal({ opened, onClose, onCreated }: {
     try {
       const trainer = await api.createTrainer({ name: name.trim() });
       onCreated(trainer);
-      notifications.show({ color: "green", title: "Entrenador registrado", message: trainer.syncStatus === "pending"
-        ? "Guardado en este equipo. Pendiente de sincronización." : "Entrenador agregado correctamente." });
+      notifications.show({ color: "green", title: "Entrenador registrado", message: "Entrenador agregado correctamente." });
       setName(""); onClose();
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));

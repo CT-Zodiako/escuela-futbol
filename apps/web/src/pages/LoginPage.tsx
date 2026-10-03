@@ -1,17 +1,37 @@
-import { useState } from "react";
-import { Button, Paper, PasswordInput, Stack, Text, TextInput, Title } from "@mantine/core";
+import { useEffect, useState } from "react";
+import { Button, Loader, Paper, PasswordInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError } from "../api/client";
+import { isDesktop } from "../api/desktop";
 import { useAuth } from "../auth/AuthContext";
+import { SetupPage } from "./SetupPage";
 import { IconLogin } from "@tabler/icons-react";
 
 export function LoginPage() {
   const { signIn } = useAuth();
+  // Under Tauri the local database decides whether first-run setup is pending.
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(isDesktop ? null : false);
   const [email, setEmail] = useState(
     () => localStorage.getItem("escuela-futbol-email") ?? "",
   );
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    let cancelled = false;
+    api.getSetupStatus()
+      .then((status) => { if (!cancelled) setSetupRequired(status.needsSetup); })
+      .catch(() => { if (!cancelled) setSetupRequired(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (setupRequired === null) {
+    return <Stack align="center" justify="center" mih="100vh"><Loader /></Stack>;
+  }
+  if (setupRequired) {
+    return <SetupPage />;
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();

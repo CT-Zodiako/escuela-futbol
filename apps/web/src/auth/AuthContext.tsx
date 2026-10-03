@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { refreshSnapshot, setToken } from "../api/client";
-import { isDesktop } from "../api/desktop";
+import { setToken } from "../api/client";
+import { admin as desktopAdmin, isDesktop } from "../api/desktop";
 
 interface AuthContextValue {
   isAuthenticated: boolean;
@@ -21,12 +21,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn: (token: string) => {
         setToken(token);
         setIsAuthenticated(true);
-        // A failed download must not discard an existing local mirror or block login.
-        if (isDesktop) void refreshSnapshot().catch(() => undefined);
       },
       signOut: () => {
+        const token = localStorage.getItem("escuela-futbol-token");
         setToken(null);
         setIsAuthenticated(false);
+        // Revoke the local session; a revoked token cannot be reused if restored.
+        if (isDesktop && token) void desktopAdmin.logout(token).catch(() => undefined);
       },
     }),
     [isAuthenticated],

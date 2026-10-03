@@ -3,6 +3,7 @@ import { Button, Modal, NumberInput, Select, Stack, Text, Textarea, TextInput } 
 import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Payment, type Student } from "../api/client";
+import { isDesktop } from "../api/desktop";
 import { parseDateOnly, toDateOnlyString } from "../date";
 import { IconDeviceFloppy } from "@tabler/icons-react";
 
@@ -108,8 +109,8 @@ export function PaymentFormModal({
         notifications.show({
           color: "green",
           title: "Pago guardado",
-          message: created.syncStatus === "pending"
-            ? `Pago de ${student.name} guardado en este equipo. Pendiente de sincronización; el comprobante se asignará al conectar.`
+          message: isDesktop
+            ? `Se registró el pago de ${student.name}.`
             : `Se registró el pago de ${student.name}. Comprobante Nº ${created.receiptNumber}.`,
           autoClose: 5000,
           withCloseButton: true,
@@ -152,10 +153,9 @@ export function PaymentFormModal({
             withAsterisk
             popoverProps={{ withinPortal: true }}
           />
-          {!isEditing && <Text size="sm" c="dimmed">
-            El número de comprobante se asigna automáticamente al llegar al servidor.
-            Sin conexión, el pago queda pendiente en este equipo.
-          </Text>}
+          {!isEditing && (isDesktop
+            ? <Text size="sm" c="dimmed">El pago se guarda directamente en este equipo.</Text>
+            : <Text size="sm" c="dimmed">El número de comprobante se asigna automáticamente al registrar el pago.</Text>)}
           <TextInput
             label="Concepto"
             placeholder="Mensualidad escuela de fútbol"

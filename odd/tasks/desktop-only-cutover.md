@@ -1,5 +1,10 @@
 # Desktop-only product cutover
 
+> **Superseded:** this cutover kept Railway PostgreSQL/API as cloud backup/sync. The product
+> later moved fully local: SQLite is the sole production store, the Railway API URL was removed
+> from Windows CI, and the `.railway` IaC was deleted. Remote Railway decommissioning is a
+> separate final task. The text below is preserved as the historical record of this cutover.
+
 ## Goal
 Retire the public web service and make the single Windows desktop installation the only production client, while keeping the React package as the frontend embedded by Tauri and keeping Railway PostgreSQL/API as cloud backup and synchronization infrastructure.
 

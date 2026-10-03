@@ -3,6 +3,7 @@ import { Button, Card, Group, Select, Stack, Table, Text, Title } from "@mantine
 import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type ReportSummary, type Trainer } from "../api/client";
+import { isDesktop } from "../api/desktop";
 import { toDateOnlyString } from "../date";
 import { IconArrowLeft, IconChartBar, IconFileTypeXls } from "@tabler/icons-react";
 
@@ -52,7 +53,7 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
-      link.download = `pagos-${toDateOnlyString(from)}-a-${toDateOnlyString(to)}.xlsx`;
+      link.download = `pagos-${toDateOnlyString(from)}-a-${toDateOnlyString(to)}.${isDesktop ? "csv" : "xlsx"}`;
       document.body.appendChild(link);
       link.click();
       link.remove();

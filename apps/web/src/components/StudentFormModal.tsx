@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Modal, Select, Stack, Text, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Student, type Trainer } from "../api/client";
-import { isDesktop, syncEvents } from "../api/desktop";
+import { isDesktop } from "../api/desktop";
 import { IconDeviceFloppy } from "@tabler/icons-react";
 
 function currentMonth(): string {
@@ -28,8 +28,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       if (active) { setTrainers(rows); setTrainerError(null); }
     }).catch(() => { if (active) setTrainerError("No se pudieron cargar los entrenadores."); }); };
     load();
-    syncEvents.addEventListener("change", load);
-    return () => { active = false; syncEvents.removeEventListener("change", load); };
+    return () => { active = false; };
   }, [opened, trainerRevision]);
   const [name, setName] = useState("");
   const [document, setDocument] = useState("");
@@ -69,12 +68,20 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       setError("El nombre es obligatorio.");
       return;
     }
-    if (!document.trim()) {
+    if (!document) {
       setDocumentError("El documento es obligatorio.");
       return;
     }
-    if (!phone.trim()) {
+    if (!/^\d+$/.test(document)) {
+      setDocumentError("El documento debe contener solo números, sin puntos ni espacios.");
+      return;
+    }
+    if (!phone) {
       setPhoneError("El teléfono es obligatorio.");
+      return;
+    }
+    if (!/^\d{10}$/.test(phone)) {
+      setPhoneError("El teléfono debe tener exactamente 10 dígitos.");
       return;
     }
     if (!trainerId) { setTrainerError("Seleccioná un entrenador."); return; }
@@ -93,9 +100,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       notifications.show({
         color: "green",
         title: "Jugador registrado",
-        message: student.syncStatus === "pending"
-          ? `${student.name} se guardó en este equipo. Pendiente de sincronización.`
-          : `${student.name} fue agregado correctamente.`,
+        message: `${student.name} fue agregado correctamente.`,
         autoClose: 5000,
         withCloseButton: true,
       });
@@ -123,7 +128,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
     <Modal opened={opened} onClose={handleClose} title="Registrar jugador" centered>
       <form onSubmit={handleSubmit} noValidate>
         <Stack gap="lg">
-          {isDesktop && <Text size="sm" c="dimmed">Se guardará en este equipo, incluso sin conexión. Quedará pendiente de sincronización hasta que el servidor confirme el registro.</Text>}
+          {isDesktop && <Text size="sm" c="dimmed">Se guardará en este equipo. No se requiere conexión a internet.</Text>}
           <TextInput
             label="Nombre"
             placeholder="Nombre y apellido"
@@ -149,7 +154,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
             placeholder="Número de documento"
             withAsterisk
             value={document}
-            onChange={(event) => setDocument(event.currentTarget.value)}
+            onChange={(event) => setDocument(event.currentTarget.value.replace(/\D/g, ""))}
             error={documentError ?? undefined}
           />
           <TextInput
@@ -157,7 +162,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
             placeholder="Teléfono de contacto"
             withAsterisk
             value={phone}
-            onChange={(event) => setPhone(event.currentTarget.value)}
+            onChange={(event) => setPhone(event.currentTarget.value.replace(/\D/g, "").slice(0, 10))}
             error={phoneError ?? undefined}
           />
           <Button type="submit" leftSection={<IconDeviceFloppy size={18} />} loading={isSubmitting}>
