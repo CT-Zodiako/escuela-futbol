@@ -30,7 +30,7 @@ import {
   IconUserPlus,
   IconCash,
 } from "@tabler/icons-react";
-import { api, ApiError, startPaymentSync, type Student } from "../api/client";
+import { api, ApiError, startPaymentSync, type Student, type Trainer } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { TrainerFormModal } from "../components/TrainerFormModal";
 import { StudentFormModal } from "../components/StudentFormModal";
@@ -41,12 +41,13 @@ import { PendingPage } from "./PendingPage";
 
 const DESKTOP_ROW_HEIGHT = 67;
 const DESKTOP_HEADER_HEIGHT = 64;
-const MOBILE_CARD_HEIGHT = 264;
+const MOBILE_CARD_HEIGHT = 288;
 
 export function DashboardPage() {
   const { signOut } = useAuth();
   const isNarrowScreen = useMediaQuery("(max-width: 640px)");
   const [students, setStudents] = useState<Student[]>([]);
+  const [trainers, setTrainers] = useState<Trainer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isTrainerModalOpen, setIsTrainerModalOpen] = useState(false);
   const [trainerRevision, setTrainerRevision] = useState(0);
@@ -61,6 +62,13 @@ export function DashboardPage() {
   const { ref: listAreaRef, height: listAreaHeight } = useElementSize();
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
+  const trainerNameById = new Map(
+    trainers.map((trainer) => [trainer.id, trainer.name]),
+  );
+  const trainerNameFor = (student: Student) =>
+    student.trainerId
+      ? (trainerNameById.get(student.trainerId) ?? "—")
+      : "—";
   const filteredStudents = normalizedSearch
     ? students.filter((student) =>
         [student.name, student.document, student.phone]
@@ -96,6 +104,11 @@ export function DashboardPage() {
     try {
       const data = await api.listStudents();
       setStudents(data);
+      try {
+        setTrainers(await api.listTrainers());
+      } catch {
+        // Roster stays usable without trainer names; keep the last known list.
+      }
     } catch (error) {
       notifications.show({
         color: "red",
@@ -114,7 +127,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     void loadStudents();
-  }, [loadStudents]);
+  }, [loadStudents, trainerRevision]);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -142,8 +155,8 @@ export function DashboardPage() {
       notifications.show({
         color: "green",
         title: updated.isActive
-          ? "Estudiante activado"
-          : "Estudiante desactivado",
+          ? "Jugador activado"
+          : "Jugador desactivado",
         message: `${updated.name} ahora está ${updated.isActive ? "activo" : "inactivo"}.`,
         autoClose: 5000,
         withCloseButton: true,
@@ -252,21 +265,21 @@ export function DashboardPage() {
       {isDesktop && <SyncPanel onRefresh={loadStudents} />}
 
       <Group justify="space-between">
-        <Title order={3}>Estudiantes</Title>
+        <Title order={3}>Jugadores</Title>
         <Button variant="light" onClick={() => setIsTrainerModalOpen(true)}>Registrar entrenador</Button>
         <Button
           leftSection={<IconUserPlus size={18} />}
           onClick={() => setIsStudentModalOpen(true)}
         >
-          Registrar estudiante
+          Registrar jugador
         </Button>
       </Group>
 
       <Stack gap="md" style={{ flex: 1, minHeight: 0 }}>
         {!showEmptyState && (
           <TextInput
-            placeholder="Buscar estudiante"
-            aria-label="Buscar estudiante"
+            placeholder="Buscar jugador"
+            aria-label="Buscar jugador"
             leftSection={<IconSearch size={18} />}
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.currentTarget.value)}
@@ -279,17 +292,17 @@ export function DashboardPage() {
         >
           {showEmptyState ? (
             <Stack align="center" gap="md" py="xl">
-              <Text c="dimmed">Todavía no hay estudiantes registrados.</Text>
+              <Text c="dimmed">Todavía no hay jugadores registrados.</Text>
               <Button
                 leftSection={<IconUserPlus size={18} />}
                 onClick={() => setIsStudentModalOpen(true)}
               >
-                Registrar primer estudiante
+                Registrar primer jugador
               </Button>
             </Stack>
           ) : showNoMatch ? (
             <Text c="dimmed" ta="center" py="xl">
-              Ningún estudiante coincide con “{searchTerm}”.
+              Ningún jugador coincide con “{searchTerm}”.
             </Text>
           ) : showResults ? (
             isNarrowScreen ? (
@@ -309,6 +322,9 @@ export function DashboardPage() {
                       </Text>
                       <Text size="sm" c="dimmed">
                         Teléfono: {student.phone ?? "—"}
+                      </Text>
+                      <Text size="sm" c="dimmed">
+                        Entrenador: {trainerNameFor(student)}
                       </Text>
                       <Stack gap="xs">
                         <Button
@@ -356,6 +372,7 @@ export function DashboardPage() {
                     <Table.Th>Nombre</Table.Th>
                     <Table.Th>Documento</Table.Th>
                     <Table.Th>Teléfono</Table.Th>
+                    <Table.Th>Entrenador</Table.Th>
                     <Table.Th>Estado</Table.Th>
                     <Table.Th></Table.Th>
                     <Table.Th></Table.Th>
@@ -371,6 +388,7 @@ export function DashboardPage() {
                       </Table.Td>
                       <Table.Td>{student.document ?? "—"}</Table.Td>
                       <Table.Td>{student.phone ?? "—"}</Table.Td>
+                      <Table.Td>{trainerNameFor(student)}</Table.Td>
                       <Table.Td>
                         <Badge color={student.isActive ? "green" : "gray"}>
                           {student.isActive ? "Activo" : "Inactivo"}

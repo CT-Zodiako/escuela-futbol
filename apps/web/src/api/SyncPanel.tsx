@@ -43,7 +43,7 @@ export function SyncPanel({ onRefresh }: { onRefresh: () => void }) {
         finally { setBusy(false); }
       }}>Actualizar datos</Button>
     </Group>
-    <Text size="xs" c="dimmed">Estudiantes e historiales se consultan localmente. Los pagos nuevos pueden guardarse sin conexión y se sincronizan al recuperar internet; los reportes requieren conexión.</Text>
+    <Text size="xs" c="dimmed">Jugadores e historiales se consultan localmente. Los pagos nuevos pueden guardarse sin conexión y se sincronizan al recuperar internet; los reportes requieren conexión.</Text>
     {error && <Text size="sm" c="red" role="alert">No se pudo sincronizar: {error} Se conserva la última descarga completa.</Text>}
   </Stack>;
 }

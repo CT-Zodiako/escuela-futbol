@@ -78,7 +78,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       });
       notifications.show({
         color: "green",
-        title: "Estudiante registrado",
+        title: "Jugador registrado",
         message: student.syncStatus === "pending"
           ? `${student.name} se guardó en este equipo. Pendiente de sincronización.`
           : `${student.name} fue agregado correctamente.`,
@@ -106,7 +106,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
   }
 
   return (
-    <Modal opened={opened} onClose={handleClose} title="Registrar estudiante" centered>
+    <Modal opened={opened} onClose={handleClose} title="Registrar jugador" centered>
       <form onSubmit={handleSubmit} noValidate>
         <Stack gap="lg">
           {isDesktop && <Text size="sm" c="dimmed">Se guardará en este equipo, incluso sin conexión. Quedará pendiente de sincronización hasta que el servidor confirme el registro.</Text>}

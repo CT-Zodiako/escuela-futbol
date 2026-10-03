@@ -71,7 +71,7 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
       </Group>
 
       {report && report.students.length === 0 ? (
-        <Text c="dimmed">No hay estudiantes activos para este mes.</Text>
+        <Text c="dimmed">No hay jugadores activos para este mes.</Text>
       ) : report ? (
         <Stack gap="lg">
           <Group gap="lg">
@@ -86,7 +86,7 @@ export function PendingPage({ onBack, onOpenHistory, students }: PendingPageProp
           <Table verticalSpacing="sm">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>Estudiante</Table.Th>
+                <Table.Th>Jugador</Table.Th>
                 <Table.Th>Estado</Table.Th>
                 <Table.Th></Table.Th>
               </Table.Tr>

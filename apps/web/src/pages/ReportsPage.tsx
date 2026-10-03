@@ -4,7 +4,7 @@ import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type ReportSummary, type Trainer } from "../api/client";
 import { toDateOnlyString } from "../date";
-import { IconArrowLeft, IconChartBar, IconFileTypeCsv } from "@tabler/icons-react";
+import { IconArrowLeft, IconChartBar, IconFileTypeXls } from "@tabler/icons-react";
 
 function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("es-CO")}`;
@@ -52,7 +52,7 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
-      link.download = `pagos-${toDateOnlyString(from)}-a-${toDateOnlyString(to)}.csv`;
+      link.download = `pagos-${toDateOnlyString(from)}-a-${toDateOnlyString(to)}.xlsx`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -134,8 +134,8 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
         <Button color="brandBlue" variant="filled" leftSection={<IconChartBar size={18} />} onClick={runReport} loading={isLoading}>
           Generar reportes
         </Button>
-        <Button variant="light" color="brandBlue" leftSection={<IconFileTypeCsv size={18} />} onClick={handleExport} loading={isExporting}>
-          Exportar CSV
+        <Button variant="light" color="brandBlue" leftSection={<IconFileTypeXls size={18} />} onClick={handleExport} loading={isExporting}>
+          Exportar Excel
         </Button>
       </Group>
 
@@ -154,7 +154,7 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
             </Card>
             <Card withBorder padding="lg">
               <Text size="sm" c="dimmed">
-                Estudiantes que pagaron
+                Jugadores que pagaron
               </Text>
               <Text size="xl" fw={700}>
                 {summary.studentsPaidCount}
@@ -173,7 +173,7 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
             >
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>Estudiante</Table.Th>
+                <Table.Th>Jugador</Table.Th>
                 <Table.Th>Total pagado</Table.Th>
               </Table.Tr>
             </Table.Thead>

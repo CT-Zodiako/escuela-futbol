@@ -76,7 +76,7 @@ export function StudentHistoryModal({ student, onClose }: StudentHistoryModalPro
       >
         {!isLoading && payments.length === 0 ? (
           <Text c="dimmed" ta="center" py="xl">
-            Todavía no hay pagos registrados para este estudiante.
+            Todavía no hay pagos registrados para este jugador.
           </Text>
         ) : (
           <Stack gap="md">

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import ExcelJS from "exceljs";
 import { prisma } from "../db.js";
 import { dateRangeSchema, monthQuerySchema } from "../validation.js";
 import { monthRange } from "../month.js";
@@ -126,17 +127,43 @@ export async function reportRoutes(app: FastifyInstance) {
       },
     });
 
-    const header = "Estudiante;Documento;Fecha de pago;Valor;Método;Observación";
-    const rows = payments.map((payment) => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Pagos");
+    worksheet.addRow(["Estudiante", "Documento", "Fecha de pago", "Valor", "Método", "Observación"]);
+    worksheet.getRow(1).font = { bold: true };
+
+    for (const payment of payments) {
       const date = payment.paymentDate.toISOString().slice(0, 10).split("-").reverse().join("/");
       const method = payment.method === "cash" ? "Efectivo" : payment.method;
-      const note = (payment.note ?? "").replace(/;/g, ",");
-      return [payment.student.name, payment.student.document ?? "", date, payment.amount, method, note].join(";");
-    });
-    const csv = [header, ...rows].join("\n");
+      worksheet.addRow([
+        payment.student.name,
+        payment.student.document ?? "",
+        date,
+        payment.amount,
+        method,
+        payment.note ?? "",
+      ]);
+    }
 
-    reply.header("Content-Type", "text/csv; charset=utf-8");
-    reply.header("Content-Disposition", `attachment; filename="pagos-${parsed.data.from}-a-${parsed.data.to}.csv"`);
-    return reply.send(csv);
+    worksheet.columns = [
+      { width: 32 },
+      { width: 16 },
+      { width: 16 },
+      { width: 14 },
+      { width: 14 },
+      { width: 40 },
+    ];
+
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    reply.header(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename="pagos-${parsed.data.from}-a-${parsed.data.to}.xlsx"`,
+    );
+    return reply.send(Buffer.from(buffer));
   });
 }

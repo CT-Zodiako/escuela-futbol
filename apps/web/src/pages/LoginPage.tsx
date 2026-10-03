@@ -40,7 +40,7 @@ export function LoginPage() {
           Escuela Futbol
         </Title>
         <Text c="dimmed" mb="xl">
-          Ingresá para gestionar estudiantes y mensualidades.
+          Ingresá para gestionar jugadores y mensualidades.
         </Text>
         <form onSubmit={handleSubmit}>
           <Stack gap="lg">

@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import jwt from "@fastify/jwt";
+import ExcelJS from "exceljs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({ payments: vi.fn() }));
@@ -23,6 +24,23 @@ const payment = (studentId: string, name: string, amount: number) => ({
 });
 beforeEach(() => { vi.resetAllMocks(); db.payments.mockResolvedValue([]); });
 afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
+
+async function worksheetRows(payload: Buffer<ArrayBufferLike>): Promise<string[][]> {
+  const workbook = new ExcelJS.Workbook();
+  // ExcelJS 4.4 declares a legacy non-generic Buffer; @types/node now returns Buffer<ArrayBuffer>.
+  // Scoped compatibility cast at this test-only workbook load boundary.
+  await workbook.xlsx.load(
+    Buffer.from(payload) as unknown as Parameters<typeof workbook.xlsx.load>[0],
+  );
+  const rows: string[][] = [];
+  workbook.worksheets[0].eachRow({ includeEmpty: false }, (row) => {
+    const values: string[] = [];
+    for (let i = 1; i <= row.cellCount; i++) values.push(row.getCell(i).text);
+    rows.push(values);
+  });
+  return rows;
+}
+const studentNames = (rows: string[][]) => rows.slice(1).map((row) => row[0]);
 
 describe.each(["summary", "export"])("%s trainer filter", (endpoint) => {
   it("requires authentication and rejects invalid trainer IDs before querying", async () => {
@@ -52,11 +70,11 @@ describe.each(["summary", "export"])("%s trainer filter", (endpoint) => {
     if (endpoint === "summary") {
       expect(response.json()).toEqual({ totalCollected: 0, studentsPaidCount: 0, paymentsCount: 0, paidStudents: [] });
     } else {
-      expect(response.body.split("\n")).toHaveLength(1);
+      expect((await worksheetRows(response.rawPayload))).toHaveLength(1);
     }
   });
 
-  it("returns totals or CSV from the scoped payments only", async () => {
+  it("returns totals or an XLSX workbook from the scoped payments only", async () => {
     const { app, headers } = await server();
     const selected = [payment("a", "Ana", 50), payment("a", "Ana", 75)];
     const other = payment("b", "Beatriz", 100);
@@ -69,11 +87,18 @@ describe.each(["summary", "export"])("%s trainer filter", (endpoint) => {
         paidStudents: [{ studentId: "a", name: "Ana", totalPaid: 125 }] });
       expect(all.json()).toMatchObject({ totalCollected: 225, studentsPaidCount: 2, paymentsCount: 3 });
     } else {
-      expect(filtered.headers["content-type"]).toContain("text/csv");
-      expect(filtered.body).toContain("Ana;123;15/09/2026;50;Efectivo;");
-      expect(filtered.body).not.toContain("Beatriz");
-      expect(filtered.body.split("\n")).toHaveLength(3);
-      expect(all.body).toContain("Beatriz");
+      expect(filtered.headers["content-type"]).toContain(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      expect(filtered.headers["content-disposition"]).toMatch(/\.xlsx"$/);
+      const filteredRows = await worksheetRows(filtered.rawPayload);
+      const filteredNames = studentNames(filteredRows);
+      expect(filteredRows).toHaveLength(3);
+      expect(filteredNames).toContain("Ana");
+      expect(filteredNames).not.toContain("Beatriz");
+      const allNames = studentNames(await worksheetRows(all.rawPayload));
+      expect(allNames).toContain("Ana");
+      expect(allNames).toContain("Beatriz");
     }
   });
 });

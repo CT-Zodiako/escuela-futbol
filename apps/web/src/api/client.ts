@@ -19,7 +19,7 @@ export function setToken(token: string | null) {
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (isDesktop && options.method && options.method !== "GET" && path !== "/api/auth/login"
     && !(["/api/payments", "/api/students", "/api/trainers"].includes(path) && options.method === "POST")) {
-    throw new ApiError("Este cambio no está disponible en escritorio. Podés registrar estudiantes y pagos.");
+    throw new ApiError("Este cambio no está disponible en escritorio. Podés registrar jugadores y pagos.");
   }
   const token = getToken();
   const headers: Record<string, string> = {
