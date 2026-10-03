@@ -18,14 +18,15 @@ Allow at most one payment for each student in each calendar month, using the exi
 - [x] Add failing local and API tests for duplicate month rejection and adjacent-month acceptance.
 - [x] Implement duplicate month validation in desktop and API payment creation.
 - [x] Run focused and regression checks; verify the desktop app behavior.
-- [ ] Commit the work unit and record the commit identity.
+- [x] Commit the work unit and record the commit identity.
 
 ## Evidence
 - RED: desktop sync tests had 2 expected failures and API payment tests had 2 expected failures before implementation.
 - GREEN: desktop sync and API payment tests pass after implementation.
 - Rule: paymentDate's `YYYY-MM` identifies the covered month; duplicate creation returns a Spanish conflict error and does not allocate a receipt.
 - Verification: desktop Rust suite 34/34 passed; API suite 60/60 passed; API and web TypeScript checks passed; `git diff --check` passed.
-- Caveat: the running desktop process was an old release binary and requires rebuild/restart before manual verification.
+- Caveat: the running desktop process was an old release binary and requires rebuild/restart before manual verification; it was rebuilt and restarted as PID 87976.
+- Work-unit commit: `844fa69 feat(payments): limit students to one payment per month`.
 
 ## Known follow-up
 - Existing historical duplicates remain visible; the rule applies to new payment creation.
