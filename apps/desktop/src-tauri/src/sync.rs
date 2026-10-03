@@ -11,6 +11,10 @@ pub struct Student {
     phone: Option<String>,
     is_active: bool,
     activation_month: String,
+    #[serde(default)]
+    client_mutation_id: Option<String>,
+    #[serde(default)]
+    sync_status: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,6 +65,9 @@ fn initialize(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS payment_outbox (
             client_mutation_id TEXT PRIMARY KEY NOT NULL,
             student_id TEXT NOT NULL, payment_date TEXT NOT NULL,
+            payload TEXT NOT NULL, server_id TEXT);
+        CREATE TABLE IF NOT EXISTS student_outbox (
+            client_mutation_id TEXT PRIMARY KEY NOT NULL,
             payload TEXT NOT NULL, server_id TEXT);")
         .map_err(|e| e.to_string())
 }
@@ -88,6 +95,7 @@ fn replace(conn: &mut Connection, snapshot: Snapshot) -> Result<()> {
         tx.execute("INSERT INTO students(id, name, payload) VALUES (?1, ?2, ?3)",
             params![student.id, student.name, payload]).map_err(|e| e.to_string())?;
     }
+    merge_student_outbox(&tx)?;
     for payment in snapshot.payments {
         if payment.id.is_empty() {
             return Err("Pago inválido.".into());
@@ -122,10 +130,94 @@ pub fn local_sync_status(app: tauri::AppHandle) -> Result<SyncStatus> {
 
 #[tauri::command]
 pub fn list_local_students(app: tauri::AppHandle) -> Result<Vec<Student>> {
-    let conn = open(&app)?;
-    let mut stmt = conn.prepare("SELECT payload FROM students ORDER BY name, id").map_err(|e| e.to_string())?;
+    local_students(&open(&app)?)
+}
+
+fn local_students(conn: &Connection) -> Result<Vec<Student>> {
+    let mut stmt = conn.prepare("SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM student_outbox o WHERE o.server_id IS NULL
+        AND o.client_mutation_id = json_extract(s.payload, '$.clientMutationId'))
+        THEN json_set(s.payload, '$.syncStatus', 'pending') ELSE s.payload END
+        FROM students s ORDER BY name, id").map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
     rows.map(|row| serde_json::from_str(&row.map_err(|e| e.to_string())?).map_err(|e| e.to_string())).collect()
+}
+
+// Retain acknowledged rows as a bridge across stale snapshots. Server rows win;
+// the UUID identity is unchanged, so existing payment references remain valid.
+fn merge_student_outbox(conn: &Connection) -> Result<()> {
+    conn.execute("INSERT INTO students(id, name, payload)
+        SELECT json_extract(o.payload, '$.id'), json_extract(o.payload, '$.name'), o.payload
+        FROM student_outbox o WHERE NOT EXISTS (
+            SELECT 1 FROM students s WHERE s.id = json_extract(o.payload, '$.id')
+            OR json_extract(s.payload, '$.clientMutationId') = o.client_mutation_id)", [])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn enqueue_student_local(conn: &mut Connection, mut student: Student) -> Result<Student> {
+    if !valid_uuid(&student.id) || student.id != student.id.to_lowercase()
+        || student.client_mutation_id.as_deref() != Some(student.id.as_str())
+        || student.name.trim().is_empty()
+        || !valid_date(&format!("{}-01", student.activation_month)) {
+        return Err("Datos de estudiante inválidos.".into());
+    }
+    student.name = student.name.trim().into();
+    student.document = student.document.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    student.phone = student.phone.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    student.is_active = true;
+    student.sync_status = Some("pending".into());
+    let payload = serde_json::to_string(&student).map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("INSERT INTO student_outbox(client_mutation_id, payload) VALUES (?1, ?2)
+        ON CONFLICT(client_mutation_id) DO NOTHING", params![student.id, payload])
+        .map_err(|e| e.to_string())?;
+    merge_student_outbox(&tx)?;
+    let saved: String = tx.query_row("SELECT payload FROM student_outbox WHERE client_mutation_id = ?1",
+        [&student.id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    serde_json::from_str(&saved).map_err(|e| e.to_string())
+}
+
+fn pending_students(conn: &Connection) -> Result<Vec<Student>> {
+    let mut stmt = conn.prepare("SELECT payload FROM student_outbox WHERE server_id IS NULL ORDER BY rowid")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+    rows.map(|row| serde_json::from_str(&row.map_err(|e| e.to_string())?).map_err(|e| e.to_string())).collect()
+}
+
+fn acknowledge_student_local(conn: &mut Connection, client_mutation_id: &str, mut student: Student) -> Result<()> {
+    if !valid_uuid(client_mutation_id) || student.id != client_mutation_id
+        || student.client_mutation_id.as_deref() != Some(client_mutation_id)
+        || student.name.trim().is_empty() {
+        return Err("Respuesta de sincronización inválida.".into());
+    }
+    student.sync_status = Some("synced".into());
+    let payload = serde_json::to_string(&student).map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let changed = tx.execute("UPDATE student_outbox SET payload = ?1, server_id = ?2
+        WHERE client_mutation_id = ?3 AND (server_id IS NULL OR server_id = ?2)",
+        params![payload, student.id, client_mutation_id]).map_err(|e| e.to_string())?;
+    if changed != 1 { return Err("Estudiante pendiente no encontrado.".into()); }
+    tx.execute("INSERT INTO students(id, name, payload) VALUES (?1, ?2, ?3)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, payload = excluded.payload",
+        params![student.id, student.name, payload]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn enqueue_student(app: tauri::AppHandle, student: Student) -> Result<Student> {
+    enqueue_student_local(&mut open(&app)?, student)
+}
+
+#[tauri::command]
+pub fn list_pending_students(app: tauri::AppHandle) -> Result<Vec<Student>> {
+    pending_students(&open(&app)?)
+}
+
+#[tauri::command]
+pub fn acknowledge_student(app: tauri::AppHandle, client_mutation_id: String, student: Student) -> Result<()> {
+    acknowledge_student_local(&mut open(&app)?, &client_mutation_id, student)
 }
 
 #[tauri::command]
@@ -275,6 +367,113 @@ mod tests {
         payment.receipt_number = Some(43);
         payment.payment_date = "2026-02-01T00:00:00.000Z".into();
         payment
+    }
+
+    fn offline_student() -> Student {
+        serde_json::from_value(serde_json::json!({
+            "id": MUTATION_ID, "clientMutationId": MUTATION_ID,
+            "name": " New student ", "document": null, "phone": null,
+            "isActive": true, "activationMonth": "2026-02"
+        })).unwrap()
+    }
+
+    #[test]
+    fn students_are_durable_idempotent_and_survive_empty_snapshots() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let saved = enqueue_student_local(&mut conn, offline_student()).unwrap();
+        assert_eq!(saved.name, "New student");
+        assert_eq!(saved.sync_status.as_deref(), Some("pending"));
+        let mut retry = offline_student();
+        retry.name = "Changed".into();
+        assert_eq!(enqueue_student_local(&mut conn, retry).unwrap().name, "New student");
+        initialize(&conn).unwrap();
+        assert_eq!(pending_students(&conn).unwrap().len(), 1);
+        replace(&mut conn, Snapshot { students: vec![], payments: vec![], generated_at: "stale".into() }).unwrap();
+        assert_eq!(local_students(&conn).unwrap().len(), 1);
+        assert_eq!(local_students(&conn).unwrap()[0].id, MUTATION_ID);
+        let mut payment = local_payment();
+        payment.student_id = MUTATION_ID.into();
+        enqueue(&conn, payment).unwrap();
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn student_acknowledgements_bridge_stale_snapshots_without_duplicates() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        enqueue_student_local(&mut conn, offline_student()).unwrap();
+        let mut fresh = local_snapshot();
+        let mut server = offline_student();
+        server.name = "Server name".into();
+        fresh.students.push(server);
+        // A lost POST response followed by a snapshot still shows one pending row.
+        replace(&mut conn, fresh).unwrap();
+        let visible = local_students(&conn).unwrap();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible.iter().find(|s| s.id == MUTATION_ID).unwrap().sync_status.as_deref(), Some("pending"));
+        for _ in 0..2 {
+            acknowledge_student_local(&mut conn, MUTATION_ID, offline_student()).unwrap();
+        }
+        assert!(pending_students(&conn).unwrap().is_empty());
+        replace(&mut conn, local_snapshot()).unwrap();
+        let visible = local_students(&conn).unwrap();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible.iter().find(|s| s.id == MUTATION_ID).unwrap().sync_status.as_deref(), Some("synced"));
+        let mut fresh = local_snapshot();
+        let mut edited = offline_student();
+        edited.name = "Updated on server".into();
+        edited.is_active = false;
+        fresh.students.push(edited);
+        replace(&mut conn, fresh).unwrap();
+        let visible = local_students(&conn).unwrap();
+        assert_eq!(visible.len(), 2);
+        let student = visible.iter().find(|s| s.id == MUTATION_ID).unwrap();
+        assert_eq!(student.name, "Updated on server");
+        assert!(!student.is_active);
+    }
+
+    #[test]
+    fn invalid_students_and_mismatched_acknowledgements_leave_queues_unchanged() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        for case in 0..4 {
+            let mut student = offline_student();
+            match case {
+                0 => student.name = " ".into(),
+                1 => student.client_mutation_id = None,
+                2 => student.activation_month = "2026-13".into(),
+                _ => student.id = "bad".into(),
+            }
+            assert!(enqueue_student_local(&mut conn, student).is_err());
+        }
+        assert!(local_students(&conn).unwrap().is_empty());
+        assert!(pending_students(&conn).unwrap().is_empty());
+        enqueue_student_local(&mut conn, offline_student()).unwrap();
+        let mut wrong = offline_student();
+        wrong.id = SERVER_ID.into();
+        assert!(acknowledge_student_local(&mut conn, MUTATION_ID, wrong).is_err());
+        assert!(acknowledge_student_local(&mut conn, SERVER_ID, offline_student()).is_err());
+        assert_eq!(pending_students(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn student_snapshot_merge_preserves_payment_references_and_rollback() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        enqueue_student_local(&mut conn, offline_student()).unwrap();
+        acknowledge_student_local(&mut conn, MUTATION_ID, offline_student()).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.students.clear();
+        snapshot.payments[0].student_id = MUTATION_ID.into();
+        replace(&mut conn, snapshot).unwrap();
+        assert_eq!(local_payments(&conn, MUTATION_ID).unwrap().len(), 1);
+        let mut bad = local_snapshot();
+        bad.payments[0].student_id = "missing".into();
+        assert!(replace(&mut conn, bad).is_err());
+        assert_eq!(local_students(&conn).unwrap().len(), 1);
+        assert_eq!(local_payments(&conn, MUTATION_ID).unwrap().len(), 1);
+        assert!(pending_students(&conn).unwrap().is_empty());
     }
 
     #[test]

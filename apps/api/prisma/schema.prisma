@@ -23,6 +23,7 @@ model Student {
   phone           String?   @map("telefono")
   isActive        Boolean   @default(true) @map("activo")
   activationMonth String    @map("mes_activacion")
+  clientMutationId String?  @unique @db.Uuid @map("mutacion_cliente_id")
   createdAt       DateTime  @default(now()) @map("creado_en")
   payments        Payment[]
 

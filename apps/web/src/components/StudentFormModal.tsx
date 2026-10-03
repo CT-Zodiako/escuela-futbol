@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Button, Modal, Stack, TextInput } from "@mantine/core";
+import { Button, Modal, Stack, Text, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError, type Student } from "../api/client";
+import { isDesktop } from "../api/desktop";
 import { IconDeviceFloppy } from "@tabler/icons-react";
 
 function currentMonth(): string {
@@ -32,6 +33,7 @@ export function StudentFormModal({ opened, onClose, onCreated }: StudentFormModa
   }
 
   function handleClose() {
+    if (isSubmitting) return;
     if (hasChanges) {
       const confirmed = window.confirm("¿Descartar los datos ingresados?");
       if (!confirmed) return;
@@ -42,6 +44,7 @@ export function StudentFormModal({ opened, onClose, onCreated }: StudentFormModa
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (isSubmitting) return;
     if (!name.trim()) {
       setError("El nombre es obligatorio.");
       return;
@@ -58,7 +61,9 @@ export function StudentFormModal({ opened, onClose, onCreated }: StudentFormModa
       notifications.show({
         color: "green",
         title: "Estudiante registrado",
-        message: `${student.name} fue agregado correctamente.`,
+        message: student.syncStatus === "pending"
+          ? `${student.name} se guardó en este equipo. Pendiente de sincronización.`
+          : `${student.name} fue agregado correctamente.`,
         autoClose: 5000,
         withCloseButton: true,
       });
@@ -86,6 +91,7 @@ export function StudentFormModal({ opened, onClose, onCreated }: StudentFormModa
     <Modal opened={opened} onClose={handleClose} title="Registrar estudiante" centered>
       <form onSubmit={handleSubmit} noValidate>
         <Stack gap="lg">
+          {isDesktop && <Text size="sm" c="dimmed">Se guardará en este equipo, incluso sin conexión. Quedará pendiente de sincronización hasta que el servidor confirme el registro.</Text>}
           <TextInput
             label="Nombre"
             placeholder="Nombre y apellido"

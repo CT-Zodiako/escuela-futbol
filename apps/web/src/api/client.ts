@@ -18,8 +18,8 @@ export function setToken(token: string | null) {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (isDesktop && options.method && options.method !== "GET" && path !== "/api/auth/login"
-    && !(path === "/api/payments" && options.method === "POST")) {
-    throw new ApiError("Este cambio requiere la versión web en línea. En escritorio podés registrar pagos.");
+    && !(["/api/payments", "/api/students"].includes(path) && options.method === "POST")) {
+    throw new ApiError("Este cambio no está disponible en escritorio. Podés registrar estudiantes y pagos.");
   }
   const token = getToken();
   const headers: Record<string, string> = {
@@ -58,6 +58,8 @@ export interface Student {
   phone: string | null;
   isActive: boolean;
   activationMonth: string;
+  clientMutationId?: string | null;
+  syncStatus?: "pending" | "synced" | null;
 }
 
 export interface PendingStudent {
@@ -107,6 +109,63 @@ export interface CreatePaymentInput {
   amount: number;
   method: string;
   note?: string;
+}
+
+let studentsInFlight: Promise<void> | null = null;
+export function syncPendingStudents(): Promise<void> {
+  if (!isDesktop) return Promise.resolve();
+  if (studentsInFlight) return studentsInFlight;
+  studentsInFlight = (async () => {
+    try {
+      await desktop.initialize();
+      for (;;) {
+        const pending = await desktop.pendingStudents();
+        if (!pending.length) break;
+        const failures: unknown[] = [];
+        for (const student of pending) {
+          try {
+            const saved = await request<Student>("/api/students", {
+              method: "POST",
+              body: JSON.stringify({
+                clientMutationId: student.clientMutationId,
+                name: student.name,
+                document: student.document ?? undefined,
+                phone: student.phone ?? undefined,
+                activationMonth: student.activationMonth,
+              }),
+            });
+            await desktop.acknowledgeStudent(student.clientMutationId!, saved);
+            notifySync(null);
+          } catch (error) {
+            failures.push(error);
+          }
+        }
+        if (failures.length) throw failures[0];
+      }
+      notifySync(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notifySync(message);
+      throw new ApiError(message);
+    } finally {
+      studentsInFlight = null;
+    }
+  })();
+  return studentsInFlight;
+}
+
+// Students precede their payments, but a rejected student must not starve
+// payments for other students. Both queues retain failures for the next retry.
+async function syncPendingOutboxes(): Promise<void> {
+  const failures: unknown[] = [];
+  try { await syncPendingStudents(); } catch (error) { failures.push(error); }
+  try { await syncPendingPayments(); } catch (error) { failures.push(error); }
+  if (failures.length) {
+    const error = failures[0];
+    const message = error instanceof Error ? error.message : String(error);
+    notifySync(message);
+    throw new ApiError(message);
+  }
 }
 
 let paymentsInFlight: Promise<void> | null = null;
@@ -162,7 +221,7 @@ export function syncPendingPayments(): Promise<void> {
 export function startPaymentSync(): () => void {
   if (!isDesktop) return () => undefined;
   const retry = () => {
-    if (getToken()) void syncPendingPayments().catch(() => undefined);
+    if (getToken()) void syncPendingOutboxes().catch(() => undefined);
   };
   retry();
   window.addEventListener("online", retry);
@@ -180,7 +239,7 @@ export function refreshSnapshot(): Promise<void> {
   refreshInFlight = (async () => {
     try {
       await desktop.initialize();
-      await syncPendingPayments();
+      await syncPendingOutboxes();
       const snapshot = await request<Snapshot>("/api/sync/snapshot");
       await desktop.replace(snapshot);
       notifySync(null);
@@ -208,16 +267,31 @@ export const api = {
     request<ReportSummary>(
       `/api/reports/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     ),
-  createStudent: (data: {
+  createStudent: async (data: {
     name: string;
     document?: string;
     phone?: string;
     activationMonth: string;
-  }) =>
-    request<Student>("/api/students", {
+  }): Promise<Student> => {
+    const clientMutationId = crypto.randomUUID();
+    if (!isDesktop) return request<Student>("/api/students", {
       method: "POST",
-      body: JSON.stringify(data),
-    }),
+      body: JSON.stringify({ ...data, clientMutationId }),
+    });
+    await desktop.initialize();
+    const student = await desktop.enqueueStudent({
+      ...data,
+      id: clientMutationId,
+      clientMutationId,
+      document: data.document ?? null,
+      phone: data.phone ?? null,
+      isActive: true,
+      syncStatus: "pending",
+    });
+    notifySync(null);
+    void syncPendingOutboxes().catch(() => undefined);
+    return student;
+  },
   createPayment: async (data: CreatePaymentInput): Promise<Payment> => {
     const clientMutationId = crypto.randomUUID();
     if (!isDesktop) return request<Payment>("/api/payments", {
@@ -234,7 +308,7 @@ export const api = {
       syncStatus: "pending",
     });
     notifySync(null);
-    void syncPendingPayments().catch(() => undefined);
+    void syncPendingOutboxes().catch(() => undefined);
     return payment;
   },
   updatePayment: (

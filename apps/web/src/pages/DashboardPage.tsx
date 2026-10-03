@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { isDesktop } from "../api/desktop";
+import { isDesktop, syncEvents } from "../api/desktop";
 import { SyncPanel } from "../api/SyncPanel";
 import {
   ActionIcon,
@@ -112,7 +112,16 @@ export function DashboardPage() {
     void loadStudents();
   }, [loadStudents]);
 
-  useEffect(() => startPaymentSync(), []);
+  useEffect(() => {
+    if (!isDesktop) return;
+    const reload = () => { void loadStudents(); };
+    syncEvents.addEventListener("change", reload);
+    const stop = startPaymentSync();
+    return () => {
+      stop();
+      syncEvents.removeEventListener("change", reload);
+    };
+  }, [loadStudents]);
 
   async function handleToggleStatus(student: Student) {
     if (student.isActive) {
@@ -238,7 +247,6 @@ export function DashboardPage() {
       <Group justify="space-between">
         <Title order={3}>Estudiantes</Title>
         <Button
-          style={{ display: isDesktop ? "none" : undefined }}
           leftSection={<IconUserPlus size={18} />}
           onClick={() => setIsStudentModalOpen(true)}
         >
@@ -265,7 +273,6 @@ export function DashboardPage() {
             <Stack align="center" gap="md" py="xl">
               <Text c="dimmed">Todavía no hay estudiantes registrados.</Text>
               <Button
-                style={{ display: isDesktop ? "none" : undefined }}
                 leftSection={<IconUserPlus size={18} />}
                 onClick={() => setIsStudentModalOpen(true)}
               >
@@ -284,6 +291,7 @@ export function DashboardPage() {
                     <Stack gap="xs">
                       <Group justify="space-between">
                         <Text fw={600}>{student.name}</Text>
+                        {student.syncStatus === "pending" && <Badge color="yellow">Pendiente de sincronización</Badge>}
                         <Badge color={student.isActive ? "green" : "gray"}>
                           {student.isActive ? "Activo" : "Inactivo"}
                         </Badge>
@@ -349,7 +357,10 @@ export function DashboardPage() {
                 <Table.Tbody>
                   {paginatedStudents.map((student) => (
                     <Table.Tr key={student.id}>
-                      <Table.Td>{student.name}</Table.Td>
+                      <Table.Td>
+                        {student.name}
+                        {student.syncStatus === "pending" && <Text size="xs" c="orange">Pendiente de sincronización</Text>}
+                      </Table.Td>
                       <Table.Td>{student.document ?? "—"}</Table.Td>
                       <Table.Td>{student.phone ?? "—"}</Table.Td>
                       <Table.Td>
@@ -415,7 +426,10 @@ export function DashboardPage() {
       <StudentFormModal
         opened={isStudentModalOpen}
         onClose={() => setIsStudentModalOpen(false)}
-        onCreated={(student) => setStudents((prev) => [...prev, student])}
+        onCreated={(student) => {
+          if (isDesktop) void loadStudents();
+          else setStudents((prev) => [...prev, student]);
+        }}
       />
 
       <PaymentFormModal

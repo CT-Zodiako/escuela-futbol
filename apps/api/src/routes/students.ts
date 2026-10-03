@@ -25,16 +25,31 @@ export async function studentRoutes(app: FastifyInstance) {
       });
     }
 
-    const student = await prisma.student.create({
-      data: {
-        name: parsed.data.name,
-        document: parsed.data.document || null,
-        phone: parsed.data.phone || null,
-        activationMonth: parsed.data.activationMonth || currentMonth(),
-      },
-    });
-
-    return reply.status(201).send(student);
+    const clientMutationId = parsed.data.clientMutationId?.toLowerCase();
+    if (clientMutationId) {
+      const existing = await prisma.student.findUnique({ where: { clientMutationId } });
+      if (existing) return reply.send(existing);
+    }
+    try {
+      const student = await prisma.student.create({
+        data: {
+          // Stable IDs let offline payments reference a student before either syncs.
+          ...(clientMutationId ? { id: clientMutationId, clientMutationId } : {}),
+          name: parsed.data.name,
+          document: parsed.data.document || null,
+          phone: parsed.data.phone || null,
+          activationMonth: parsed.data.activationMonth || currentMonth(),
+        },
+      });
+      return reply.status(201).send(student);
+    } catch (error) {
+      // The unique index arbitrates concurrent submissions, including lost responses.
+      if (clientMutationId && (error as { code?: string }).code === "P2002") {
+        const existing = await prisma.student.findUnique({ where: { clientMutationId } });
+        if (existing) return reply.send(existing);
+      }
+      throw error;
+    }
   });
 
   app.put("/api/students/:id/status", async (request, reply) => {

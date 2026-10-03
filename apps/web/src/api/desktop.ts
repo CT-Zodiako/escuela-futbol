@@ -15,6 +15,10 @@ export const desktop = {
   students: () => invoke<Student[]>("list_local_students"),
   payments: (studentId: string) => invoke<Payment[]>("list_local_payments", { studentId }),
   status: () => invoke<SyncStatus>("local_sync_status"),
+  enqueueStudent: (student: Student) => invoke<Student>("enqueue_student", { student }),
+  pendingStudents: () => invoke<Student[]>("list_pending_students"),
+  acknowledgeStudent: (clientMutationId: string, student: Student) =>
+    invoke<void>("acknowledge_student", { clientMutationId, student }),
   enqueuePayment: (payment: Payment) => invoke<Payment>("enqueue_payment", { payment }),
   pendingPayments: () => invoke<Payment[]>("list_pending_payments"),
   acknowledgePayment: (clientMutationId: string, payment: Payment) =>

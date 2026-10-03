@@ -3,6 +3,7 @@ import { z } from "zod";
 export const monthPattern = /^\d{4}-\d{2}$/;
 
 export const createStudentSchema = z.object({
+  clientMutationId: z.string().uuid("Identificador de estudiante inválido.").optional(),
   name: z.string().trim().min(1, "El nombre es obligatorio."),
   document: z.string().trim().min(1).optional().or(z.literal("")),
   phone: z.string().trim().min(1).optional().or(z.literal("")),
