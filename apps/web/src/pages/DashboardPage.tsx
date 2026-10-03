@@ -29,6 +29,7 @@ import {
   IconUserOff,
   IconUserPlus,
   IconCash,
+  IconPencil,
 } from "@tabler/icons-react";
 import { api, ApiError, type Student, type Trainer } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -59,6 +60,7 @@ export function DashboardPage() {
   const [isTrainerModalOpen, setIsTrainerModalOpen] = useState(false);
   const [trainerRevision, setTrainerRevision] = useState(0);
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [paymentStudent, setPaymentStudent] = useState<Student | null>(null);
   const [historyStudent, setHistoryStudent] = useState<Student | null>(null);
   const [view, setView] = useState<"students" | "reports" | "pending">(
@@ -340,6 +342,14 @@ export function DashboardPage() {
                           Ver Historial Pagos
                         </Button>
                         <Button
+                          variant="default"
+                          leftSection={<IconPencil size={16} />}
+                          fullWidth
+                          onClick={() => setEditingStudent(student)}
+                        >
+                          Editar
+                        </Button>
+                        <Button
                           variant="light"
                           color={student.isActive ? "red" : "green"}
                           leftSection={
@@ -369,6 +379,7 @@ export function DashboardPage() {
                     <Table.Th>Teléfono</Table.Th>
                     <Table.Th>Entrenador</Table.Th>
                     <Table.Th>Estado</Table.Th>
+                    <Table.Th></Table.Th>
                     <Table.Th></Table.Th>
                     <Table.Th></Table.Th>
                     <Table.Th></Table.Th>
@@ -405,6 +416,15 @@ export function DashboardPage() {
                           onClick={() => setHistoryStudent(student)}
                         >
                           Ver Historial Pagos
+                        </Button>
+                      </Table.Td>
+                      <Table.Td>
+                        <Button
+                          variant="default"
+                          leftSection={<IconPencil size={16} />}
+                          onClick={() => setEditingStudent(student)}
+                        >
+                          Editar
                         </Button>
                       </Table.Td>
                       <Table.Td>
@@ -450,11 +470,19 @@ export function DashboardPage() {
       />
       <StudentFormModal
         trainerRevision={trainerRevision}
-        opened={isStudentModalOpen}
-        onClose={() => setIsStudentModalOpen(false)}
+        opened={isStudentModalOpen || editingStudent !== null}
+        student={editingStudent}
+        onClose={() => {
+          setIsStudentModalOpen(false);
+          setEditingStudent(null);
+        }}
         onCreated={(student) => {
           if (isDesktop) void loadStudents();
-          else setStudents((prev) => [...prev, student]);
+          else if (editingStudent) {
+            setStudents((prev) =>
+              prev.map((s) => (s.id === student.id ? student : s))
+            );
+          } else setStudents((prev) => [...prev, student]);
         }}
       />
 

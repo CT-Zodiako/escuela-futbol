@@ -15,9 +15,12 @@ interface StudentFormModalProps {
   opened: boolean;
   onClose: () => void;
   onCreated: (student: Student) => void;
+  // Edit mode: prefills the form and updates the given student instead of creating one.
+  student?: Student | null;
 }
 
-export function StudentFormModal({ opened, onClose, onCreated, trainerRevision = 0 }: StudentFormModalProps) {
+export function StudentFormModal({ opened, onClose, onCreated, trainerRevision = 0, student = null }: StudentFormModalProps) {
+  const isEditing = student !== null;
   const [trainers, setTrainers] = useState<Trainer[]>([]);
   const [trainerId, setTrainerId] = useState<string | null>(null);
   const [trainerError, setTrainerError] = useState<string | null>(null);
@@ -38,7 +41,26 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const hasChanges = trainerId !== null || name.trim() !== "" || document.trim() !== "" || phone.trim() !== "";
+  // Prefill from the student being edited (or reset for a create) each time the
+  // modal opens, so a previous session never leaks into the new form.
+  useEffect(() => {
+    if (!opened) return;
+    setTrainerId(student?.trainerId ?? null);
+    setTrainerError(null);
+    setName(student?.name ?? "");
+    setDocument(student?.document ?? "");
+    setPhone(student?.phone ?? "");
+    setError(null);
+    setDocumentError(null);
+    setPhoneError(null);
+  }, [opened, student]);
+
+  const hasChanges = isEditing
+    ? trainerId !== (student.trainerId ?? null)
+      || name.trim() !== (student.name ?? "").trim()
+      || document.trim() !== (student.document ?? "").trim()
+      || phone.trim() !== (student.phone ?? "").trim()
+    : trainerId !== null || name.trim() !== "" || document.trim() !== "" || phone.trim() !== "";
 
   function reset() {
     setTrainerId(null);
@@ -90,7 +112,26 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
     setPhoneError(null);
     setIsSubmitting(true);
     try {
-      const student = await api.createStudent({
+      if (isEditing) {
+        const updated = await api.updateStudent(student.id, {
+          trainerId,
+          name: name.trim(),
+          document: document.trim(),
+          phone: phone.trim(),
+        });
+        notifications.show({
+          color: "green",
+          title: "Jugador actualizado",
+          message: `${updated.name} fue actualizado correctamente.`,
+          autoClose: 5000,
+          withCloseButton: true,
+        });
+        reset();
+        onCreated(updated);
+        onClose();
+        return;
+      }
+      const created = await api.createStudent({
         trainerId,
         name: name.trim(),
         document: document.trim(),
@@ -100,12 +141,12 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
       notifications.show({
         color: "green",
         title: "Jugador registrado",
-        message: `${student.name} fue agregado correctamente.`,
+        message: `${created.name} fue agregado correctamente.`,
         autoClose: 5000,
         withCloseButton: true,
       });
       reset();
-      onCreated(student);
+      onCreated(created);
       onClose();
     } catch (submitError) {
       const message =
@@ -125,7 +166,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
   }
 
   return (
-    <Modal opened={opened} onClose={handleClose} title="Registrar jugador" centered>
+    <Modal opened={opened} onClose={handleClose} title={isEditing ? "Editar jugador" : "Registrar jugador"} centered>
       <form onSubmit={handleSubmit} noValidate>
         <Stack gap="lg">
           {isDesktop && <Text size="sm" c="dimmed">Se guardará en este equipo. No se requiere conexión a internet.</Text>}
@@ -166,7 +207,7 @@ export function StudentFormModal({ opened, onClose, onCreated, trainerRevision =
             error={phoneError ?? undefined}
           />
           <Button type="submit" leftSection={<IconDeviceFloppy size={18} />} loading={isSubmitting}>
-            Guardar
+            {isEditing ? "Guardar cambios" : "Guardar"}
           </Button>
         </Stack>
       </form>

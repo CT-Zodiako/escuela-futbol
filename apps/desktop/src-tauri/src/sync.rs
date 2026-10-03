@@ -618,6 +618,15 @@ pub struct PaymentUpdate {
     note: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudentUpdate {
+    trainer_id: Option<String>,
+    name: String,
+    document: Option<String>,
+    phone: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaidStudentReport {
@@ -745,6 +754,63 @@ fn set_student_status_local(conn: &Connection, id: &str, is_active: bool) -> Res
     if let Some(stored) = stored {
         let mut student: Student = serde_json::from_str(&stored).map_err(|e| e.to_string())?;
         apply_student_status(&mut student, is_active);
+        let payload = serde_json::to_string(&student).map_err(|e| e.to_string())?;
+        conn.execute("UPDATE student_outbox SET payload = ?1 WHERE client_mutation_id = ?2",
+            params![payload, id]).map_err(|e| e.to_string())?;
+        if result.is_none() { result = Some(student); }
+    }
+    result.ok_or_else(|| "Estudiante no encontrado.".into())
+}
+
+fn validate_student_update(conn: &Connection, update: &StudentUpdate) -> Result<()> {
+    if update.name.trim().is_empty()
+        || !valid_student_identity(update.document.as_deref(), update.phone.as_deref()) {
+        return Err("Datos de estudiante inválidos.".into());
+    }
+    let trainer_id = update.trainer_id.as_deref().ok_or("Seleccioná un entrenador.")?;
+    if !valid_uuid(trainer_id) { return Err("Entrenador no encontrado.".into()); }
+    // With no local trainer data there is nothing to validate against; once at
+    // least one trainer exists, the assignment must reference one of them.
+    let known: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM trainers WHERE id = ?1)
+        OR NOT EXISTS(SELECT 1 FROM trainers)", [trainer_id], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    if !known { return Err("Entrenador no encontrado.".into()); }
+    Ok(())
+}
+
+fn apply_student_update(student: &mut Student, update: &StudentUpdate) {
+    // Identity and billing fields (id, isActive, activationMonth, payments)
+    // stay untouched; an edit only relabels the student and reassigns the trainer.
+    student.trainer_id = update.trainer_id.clone();
+    student.name = update.name.trim().into();
+    student.document = update.document.as_deref().map(|value| value.trim().to_string());
+    student.phone = update.phone.as_deref().map(|value| value.trim().to_string());
+}
+
+// Snapshot (server-synced) rows live in `students`; pending offline rows live
+// in `student_outbox` keyed by their client mutation id. Both are editable so
+// corrections work before and after synchronization, mirroring
+// update_payment_local. A pending offline student exists in both tables, so
+// every match updates; validation runs before any write so a rejected edit
+// leaves stored data untouched.
+fn update_student_local(conn: &Connection, id: &str, update: &StudentUpdate) -> Result<Student> {
+    validate_student_update(conn, update)?;
+    let mut result: Option<Student> = None;
+    let stored: Option<String> = conn.query_row("SELECT payload FROM students WHERE id = ?1",
+        [id], |row| row.get(0)).optional().map_err(|e| e.to_string())?;
+    if let Some(stored) = stored {
+        let mut student: Student = serde_json::from_str(&stored).map_err(|e| e.to_string())?;
+        apply_student_update(&mut student, update);
+        let payload = serde_json::to_string(&student).map_err(|e| e.to_string())?;
+        conn.execute("UPDATE students SET name = ?1, payload = ?2 WHERE id = ?3",
+            params![student.name, payload, id]).map_err(|e| e.to_string())?;
+        result = Some(student);
+    }
+    let stored: Option<String> = conn.query_row("SELECT payload FROM student_outbox WHERE client_mutation_id = ?1",
+        [id], |row| row.get(0)).optional().map_err(|e| e.to_string())?;
+    if let Some(stored) = stored {
+        let mut student: Student = serde_json::from_str(&stored).map_err(|e| e.to_string())?;
+        apply_student_update(&mut student, update);
         let payload = serde_json::to_string(&student).map_err(|e| e.to_string())?;
         conn.execute("UPDATE student_outbox SET payload = ?1 WHERE client_mutation_id = ?2",
             params![payload, id]).map_err(|e| e.to_string())?;
@@ -949,6 +1015,11 @@ fn export_general_report_local(conn: &Connection, year: i64, trainer_id: Option<
     for amount in report.monthly_totals { csv.push_str(&format!(",{amount}")); }
     csv.push_str(&format!(",{}\n", report.total_collected));
     Ok(csv)
+}
+
+#[tauri::command]
+pub fn update_local_student(app: tauri::AppHandle, id: String, update: StudentUpdate) -> Result<Student> {
+    update_student_local(&open(&app)?, &id, &update)
 }
 
 #[tauri::command]
@@ -1840,6 +1911,14 @@ mod tests {
             amount: 250, method: " transfer ".into(), note: Some(" ajuste ".into()) }
     }
 
+    // Contract for the local student edit operation: trims and applies
+    // name/trainer/document/phone while preserving identity, activation month,
+    // status, and payment history. Mirrors the PaymentUpdate/Student pairing.
+    fn student_update() -> StudentUpdate {
+        StudentUpdate { trainer_id: Some(SERVER_ID.into()), name: " Edited student ".into(),
+            document: Some(" 1030456789 ".into()), phone: Some("3007654321".into()) }
+    }
+
     #[test]
     fn update_payment_edits_snapshot_rows_and_pending_outbox_rows() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1910,6 +1989,98 @@ mod tests {
         assert!(!pending_row.is_active);
         assert_eq!(pending_students(&conn).unwrap()[0].is_active, false);
         assert!(set_student_status_local(&conn, "missing", false).is_err());
+    }
+
+    #[test]
+    fn update_student_edits_name_trainer_and_identity_preserving_row_fields() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        let updated = update_student_local(&conn, STUDENT_ID, &student_update()).unwrap();
+        assert_eq!(updated.id, STUDENT_ID);
+        assert_eq!(updated.name, "Edited student");
+        assert_eq!(updated.trainer_id.as_deref(), Some(SERVER_ID));
+        assert_eq!(updated.document.as_deref(), Some("1030456789"));
+        assert_eq!(updated.phone.as_deref(), Some("3007654321"));
+        // Identity and billing fields survive the edit untouched.
+        assert!(!updated.is_active);
+        assert_eq!(updated.activation_month, "2026-01");
+        assert_eq!(updated.client_mutation_id, None);
+        assert_eq!(updated.sync_status, None);
+        // Payment history keeps referencing the same student id.
+        let history = local_payments(&conn, STUDENT_ID).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].receipt_number, Some(42));
+        // The stored row reflects the change after a fresh read.
+        let visible = local_students(&conn).unwrap();
+        assert_eq!(visible[0].name, "Edited student");
+        assert_eq!(visible[0].document.as_deref(), Some("1030456789"));
+        // A pending offline student is editable through its client mutation id.
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        enqueue_student_local(&mut conn, offline_student()).unwrap();
+        let pending_row = update_student_local(&conn, MUTATION_ID, &student_update()).unwrap();
+        assert_eq!(pending_row.name, "Edited student");
+        assert_eq!(pending_students(&conn).unwrap()[0].phone.as_deref(), Some("3007654321"));
+    }
+
+    #[test]
+    fn update_student_rejects_missing_or_unknown_trainers_and_unknown_students() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        let original: String = conn.query_row("SELECT payload FROM students WHERE id = ?1",
+            [STUDENT_ID], |row| row.get(0)).unwrap();
+        // Unknown trainer id (valid UUID, not stored locally).
+        let mut unknown = student_update();
+        unknown.trainer_id = Some("e3f1a2c4-1111-4b2b-9c3d-1234567890ab".into());
+        assert!(update_student_local(&conn, STUDENT_ID, &unknown).is_err());
+        // Malformed trainer id.
+        let mut invalid = student_update();
+        invalid.trainer_id = Some("bad".into());
+        assert!(update_student_local(&conn, STUDENT_ID, &invalid).is_err());
+        // Unassigned student.
+        let mut unassigned = student_update();
+        unassigned.trainer_id = None;
+        assert!(update_student_local(&conn, STUDENT_ID, &unassigned).is_err());
+        // Unknown student id, even with a valid stored trainer.
+        assert!(update_student_local(&conn, "e3f1a2c4-1111-4b2b-9c3d-1234567890ab", &student_update()).is_err());
+        // Rejected edits leave the stored row untouched.
+        let stored: String = conn.query_row("SELECT payload FROM students WHERE id = ?1",
+            [STUDENT_ID], |row| row.get(0)).unwrap();
+        assert_eq!(stored, original);
+    }
+
+    #[test]
+    fn update_student_rejects_invalid_identity_without_changing_stored_data() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        for case in 0..9 {
+            let mut update = student_update();
+            match case {
+                0 => update.name = " ".into(),
+                1 => update.document = Some("1030 456 789".into()),
+                2 => update.document = Some("1.030.456.789".into()),
+                3 => update.document = Some("1030-456-789".into()),
+                4 => update.document = Some("doc103045".into()),
+                5 => update.document = Some("1030456789a".into()),
+                6 => update.phone = Some("300123456".into()),
+                7 => update.phone = Some("30012345678".into()),
+                _ => update.phone = Some("300-123-4567".into()),
+            }
+            assert!(update_student_local(&conn, STUDENT_ID, &update).is_err(), "case {case}");
+        }
+        // Nothing changed after the rejected attempts.
+        let visible = local_students(&conn).unwrap();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].name, "Student");
+        assert_eq!(visible[0].document, None);
+        assert_eq!(visible[0].phone, None);
+        let history = local_payments(&conn, STUDENT_ID).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].receipt_number, Some(42));
     }
 
     #[test]

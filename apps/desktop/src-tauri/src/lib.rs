@@ -34,6 +34,7 @@ pub fn run() {
             sync::login_local_admin,
             sync::logout_local_admin,
             sync::update_local_payment,
+            sync::update_local_student,
             sync::set_local_student_status,
             sync::local_payment_summary,
             sync::local_pending_report,

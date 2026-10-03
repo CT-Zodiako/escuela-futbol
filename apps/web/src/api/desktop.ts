@@ -34,6 +34,12 @@ export const desktop = {
   }) => invoke<Payment>("update_local_payment", { id, update }),
   setStudentStatus: (id: string, isActive: boolean) =>
     invoke<Student>("set_local_student_status", { id, isActive }),
+  updateStudent: (id: string, update: {
+    trainerId: string;
+    name: string;
+    document: string;
+    phone: string;
+  }) => invoke<Student>("update_local_student", { id, update }),
   paymentSummary: (from: string, to: string, trainerId?: string) =>
     invoke<ReportSummary>("local_payment_summary", { from, to, trainerId }),
   pendingReport: (month: string) => invoke<PendingReport>("local_pending_report", { month }),
