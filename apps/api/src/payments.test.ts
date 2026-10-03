@@ -3,7 +3,7 @@ import jwt from "@fastify/jwt";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
-  transaction: vi.fn(), query: vi.fn(), student: vi.fn(), find: vi.fn(), create: vi.fn(),
+  transaction: vi.fn(), query: vi.fn(), student: vi.fn(), find: vi.fn(), findFirst: vi.fn(), create: vi.fn(),
 }));
 vi.mock("./db.js", () => ({ prisma: { $transaction: db.transaction } }));
 import { paymentRoutes } from "./routes/payments.js";
@@ -28,13 +28,14 @@ beforeEach(() => {
   vi.resetAllMocks();
   db.student.mockResolvedValue({ id: input.studentId });
   db.find.mockResolvedValue(null);
+  db.findFirst.mockResolvedValue(null);
   db.query.mockImplementation(async (sql: TemplateStringsArray) =>
     sql.join("").includes("UPDATE") ? [{ value: 43 }] : [{ id: 1 }]);
   db.create.mockImplementation(async ({ data }) => ({ id: "server-payment", ...data }));
   db.transaction.mockImplementation(async (callback) => callback({
     $queryRaw: db.query,
     student: { findUnique: db.student },
-    payment: { findUnique: db.find, create: db.create },
+    payment: { findUnique: db.find, findFirst: db.findFirst, create: db.create },
   }));
 });
 afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
@@ -92,6 +93,30 @@ describe("POST /api/payments", () => {
     expect(response.statusCode).toBe(404);
     expect(db.query).toHaveBeenCalledTimes(1);
     expect(db.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second payment for the same student and month without allocating", async () => {
+    db.findFirst.mockResolvedValue({ id: "existing-payment", studentId: input.studentId });
+    const { app, headers } = await server();
+    const response = await app.inject({ method: "POST", url: "/api/payments", headers, payload: input });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().message).toContain("mes");
+    // The lock was taken but the counter never incremented and nothing was inserted.
+    expect(db.query).toHaveBeenCalledTimes(1);
+    expect(db.query.mock.calls[0][0].join("")).toContain("FOR UPDATE");
+    expect(db.create).not.toHaveBeenCalled();
+  });
+
+  it("accepts a payment when the student has none in that month", async () => {
+    db.findFirst.mockResolvedValue(null);
+    const { app, headers } = await server();
+    const response = await app.inject({ method: "POST", url: "/api/payments", headers,
+      payload: { ...input, paymentDate: "2026-10-05" } });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().receiptNumber).toBe(43);
+    expect(db.findFirst).toHaveBeenCalledWith({ where: { studentId: input.studentId,
+      paymentDate: { gte: new Date("2026-10-01"), lt: new Date("2026-11-01") } } });
+    expect(db.create).toHaveBeenCalled();
   });
 
   it("propagates insertion failure through the transaction boundary", async () => {

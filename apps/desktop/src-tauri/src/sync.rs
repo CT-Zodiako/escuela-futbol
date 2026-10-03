@@ -505,6 +505,22 @@ fn enqueue(conn: &Connection, mut payment: Payment) -> Result<Payment> {
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM students WHERE id = ?1)",
         [&payment.student_id], |row| row.get(0)).map_err(|e| e.to_string())?;
     if !exists { return Err("Estudiante no encontrado en los datos locales.".into()); }
+    // One payment per student per calendar month: the paymentDate month is the
+    // covered month. This pre-transaction check is only a fast path; it cannot
+    // close a write race on its own, so the authoritative check repeats inside
+    // the transaction below. Rows already created by this same
+    // clientMutationId are excluded so idempotent re-enqueue retries still
+    // return the stored payment instead of colliding with themselves.
+    let month = payment.payment_date[..7].to_string();
+    let duplicate: bool = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM payments WHERE student_id = ?1 AND substr(payment_date, 1, 7) = ?2
+                AND id != ?3 AND coalesce(json_extract(payload, '$.clientMutationId'), '') != ?3
+            UNION ALL
+            SELECT 1 FROM payment_outbox WHERE student_id = ?1 AND substr(payment_date, 1, 7) = ?2
+                AND client_mutation_id != ?3)",
+        params![payment.student_id, month, payment.id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    if duplicate { return Err("El estudiante ya tiene un pago registrado en ese mes.".into()); }
     payment.receipt_number = None;
     // Local-only: the row is final once committed, so there is no pending state.
     payment.sync_status = None;
@@ -515,13 +531,30 @@ fn enqueue(conn: &Connection, mut payment: Payment) -> Result<Payment> {
     // consuming a number. Reservation, allocation, and payload write commit as
     // one transaction, so concurrent writers can never reuse a number.
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    tx.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
+    let inserted = tx.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
         VALUES (?1, ?2, ?3, ?4) ON CONFLICT(client_mutation_id) DO NOTHING",
         params![payment.id, payment.student_id, payment.payment_date, payload]).map_err(|e| e.to_string())?;
     let stored: String = tx.query_row("SELECT payload FROM payment_outbox WHERE client_mutation_id = ?1",
         [&payment.id], |row| row.get(0)).map_err(|e| e.to_string())?;
     let mut saved: Payment = serde_json::from_str(&stored).map_err(|e| e.to_string())?;
-    if saved.receipt_number.is_none() {
+    if inserted != 0 && saved.receipt_number.is_none() {
+        // Authoritative one-payment-per-month check, repeated inside the
+        // transaction: a concurrent writer that commits between the
+        // pre-transaction check and this insert is visible here, so two local
+        // writers can never register the same month. The `inserted != 0` gate
+        // keeps idempotent retries of an existing clientMutationId on the
+        // return-stored-payload path. Returning early drops the transaction,
+        // so the duplicate attempt rolls back: no outbox row survives and no
+        // receipt number is consumed.
+        let duplicate: bool = tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM payments WHERE student_id = ?1 AND substr(payment_date, 1, 7) = ?2
+                    AND id != ?3 AND coalesce(json_extract(payload, '$.clientMutationId'), '') != ?3
+                UNION ALL
+                SELECT 1 FROM payment_outbox WHERE student_id = ?1 AND substr(payment_date, 1, 7) = ?2
+                    AND client_mutation_id != ?3)",
+            params![payment.student_id, month, payment.id], |row| row.get(0)).map_err(|e| e.to_string())?;
+        if duplicate { return Err("El estudiante ya tiene un pago registrado en ese mes.".into()); }
         tx.execute("UPDATE receipt_counter SET next_number = next_number + 1 WHERE id = 1", [])
             .map_err(|e| e.to_string())?;
         let number: i64 = tx.query_row("SELECT next_number - 1 FROM receipt_counter WHERE id = 1", [],
@@ -1452,7 +1485,11 @@ mod tests {
         snapshot.payments.clear();
         replace(&mut conn, snapshot).unwrap();
         assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(1));
-        let saved = enqueue(&conn, second_local_payment()).unwrap();
+        // Same student, different month: the rule allows it and the receipt
+        // sequence continues.
+        let mut next_month = second_local_payment();
+        next_month.payment_date = "2026-03-01".into();
+        let saved = enqueue(&conn, next_month).unwrap();
         assert_eq!(saved.receipt_number, Some(2));
         assert_eq!(pending(&conn).unwrap().len(), 2);
     }
@@ -1469,7 +1506,130 @@ mod tests {
         assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(1));
         assert_eq!(pending(&conn).unwrap().len(), 1);
         // The skipped number is not consumed: the next new payment takes it.
-        assert_eq!(enqueue(&conn, second_local_payment()).unwrap().receipt_number, Some(2));
+        // It covers a different month, so the one-payment-per-month rule allows it.
+        let mut next_month = second_local_payment();
+        next_month.payment_date = "2026-03-01".into();
+        assert_eq!(enqueue(&conn, next_month).unwrap().receipt_number, Some(2));
+        assert_eq!(pending(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn duplicate_month_payment_is_rejected_for_the_same_student() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        // The synced snapshot already covers 2026-01 for STUDENT_ID (receipt 42).
+        replace(&mut conn, local_snapshot()).unwrap();
+        let saved = enqueue(&conn, local_payment()).unwrap();
+        assert_eq!(saved.receipt_number, Some(43));
+        // The same student cannot pay the same month twice, even with a new
+        // client mutation id (this is not an idempotent retry).
+        let err = enqueue(&conn, second_local_payment()).unwrap_err();
+        assert!(err.contains("mes"), "unexpected error: {err}");
+        // A month already covered by a synced payment cannot be paid again.
+        let mut january = second_local_payment();
+        january.payment_date = "2026-01-20".into();
+        assert!(enqueue(&conn, january).is_err());
+        assert_eq!(pending(&conn).unwrap().len(), 1);
+        // The rejected attempts never consumed a receipt number.
+        let mut march = second_local_payment();
+        march.payment_date = "2026-03-01".into();
+        assert_eq!(enqueue(&conn, march).unwrap().receipt_number, Some(44));
+    }
+
+    #[test]
+    fn concurrent_duplicate_month_writer_rolls_back_without_a_receipt() {
+        // The pre-transaction duplicate check cannot see a concurrent writer's
+        // uncommitted row, so only the in-transaction check can stop a
+        // duplicate month. A second connection reserves the same month while
+        // its transaction is still open; the local enqueue must then fail,
+        // roll back, and leave the receipt counter untouched.
+        let dir = std::env::temp_dir().join(format!("escuela-sync-test-{}", uuid_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sync.sqlite3");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            initialize(&conn).unwrap();
+            replace(&mut conn, local_snapshot()).unwrap();
+        }
+        // Open and initialize the contending connection before the writer
+        // holds the lock: initialize runs DDL that would otherwise block on
+        // the writer's transaction and delay the pre-transaction check past
+        // the commit.
+        let conn_b = Connection::open(&path).unwrap();
+        initialize(&conn_b).unwrap();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+        let path_for_writer = path.clone();
+        let writer = std::thread::spawn(move || {
+            let conn = Connection::open(&path_for_writer).unwrap();
+            initialize(&conn).unwrap();
+            let tx = conn.unchecked_transaction().unwrap();
+            let mut payment = local_payment();
+            payment.id = SERVER_ID.into();
+            payment.client_mutation_id = Some(SERVER_ID.into());
+            let payload = serde_json::to_string(&payment).unwrap();
+            tx.execute("INSERT INTO payment_outbox(client_mutation_id, student_id, payment_date, payload)
+                VALUES (?1, ?2, ?3, ?4)",
+                params![SERVER_ID, STUDENT_ID, payment.payment_date, payload]).unwrap();
+            ready_tx.send(()).unwrap();
+            // Hold the write lock long enough for the enqueue below to pass
+            // its pre-transaction check and block on this row's lock.
+            std::thread::sleep(std::time::Duration::from_millis(2000));
+            tx.commit().unwrap();
+        });
+        ready_rx.recv().unwrap();
+        // The concurrent row is still uncommitted here, so the fast-path check
+        // passes and only the in-transaction check can reject this payment.
+        let err = enqueue(&conn_b, local_payment()).unwrap_err();
+        assert!(err.contains("mes"), "unexpected error: {err}");
+        writer.join().unwrap();
+        // The duplicate attempt rolled back: exactly one outbox row survives
+        // (the concurrent writer's) and no receipt number was consumed, so the
+        // counter stays seeded at 43 by the imported receipt 42.
+        assert_eq!(count_rows(&conn_b, "payment_outbox"), 1);
+        let mutation: String = conn_b.query_row("SELECT client_mutation_id FROM payment_outbox",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(mutation, SERVER_ID);
+        let next: i64 = conn_b.query_row("SELECT next_number FROM receipt_counter WHERE id = 1",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(next, 43);
+        drop(conn_b);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn payments_for_adjacent_months_are_accepted() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        replace(&mut conn, local_snapshot()).unwrap(); // 2026-01 already paid
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(43)); // 2026-02
+        let mut next_month = second_local_payment();
+        next_month.payment_date = "2026-03-05".into();
+        assert_eq!(enqueue(&conn, next_month).unwrap().receipt_number, Some(44));
+        let mut previous_month = local_payment();
+        previous_month.id = "c3f1a2c4-1111-4b2b-9c3d-1234567890ad".into();
+        previous_month.client_mutation_id = Some(previous_month.id.clone());
+        previous_month.payment_date = "2025-12-15".into();
+        assert_eq!(enqueue(&conn, previous_month).unwrap().receipt_number, Some(45));
+        assert_eq!(pending(&conn).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn another_student_can_pay_in_the_same_month() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut snapshot = local_snapshot();
+        snapshot.students.push(serde_json::from_value(serde_json::json!({
+            "id": "e3f1a2c4-1111-4b2b-9c3d-1234567890ab",
+            "name": "Second student", "document": null, "phone": null,
+            "isActive": true, "activationMonth": "2026-01" })).unwrap());
+        replace(&mut conn, snapshot).unwrap();
+        assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(43));
+        // Same month, different student: allowed.
+        let mut other = second_local_payment();
+        other.student_id = "e3f1a2c4-1111-4b2b-9c3d-1234567890ab".into();
+        assert_eq!(enqueue(&conn, other).unwrap().receipt_number, Some(44));
+        // The rule stays scoped per student: the first student still cannot repeat.
+        assert!(enqueue(&conn, second_local_payment()).is_err());
         assert_eq!(pending(&conn).unwrap().len(), 2);
     }
 
@@ -1492,7 +1652,9 @@ mod tests {
         assert_eq!(enqueue(&conn, local_payment()).unwrap().receipt_number, Some(43));
         // Additive migrations must not reset the sequence or reuse issued numbers.
         initialize(&conn).unwrap();
-        let saved = enqueue(&conn, second_local_payment()).unwrap();
+        let mut next_month = second_local_payment();
+        next_month.payment_date = "2026-03-01".into();
+        let saved = enqueue(&conn, next_month).unwrap();
         assert_eq!(saved.receipt_number, Some(44));
     }
 
