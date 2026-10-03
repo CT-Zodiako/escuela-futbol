@@ -27,7 +27,7 @@ Assign persistent, sequential receipt numbers to payments created in the local d
 - Implementation: `apps/desktop/src-tauri/src/sync.rs` adds persistent `receipt_counter`, monotonic snapshot seeding, and atomic idempotent allocation.
 - Verification: `cargo test --lib receipt --offline` → 5 passed; `cargo test --lib --offline` → 30 passed; `cargo check --offline --all-targets` → clean; `pnpm build` in `apps/web` → successful; `git diff --check` → clean.
 - Caveat: no bundled desktop runtime launch was performed during verification.
-- Work-unit commit: `66f985e feat(desktop): assign local receipt numbers`.
+- Work-unit commit: `e89e669 feat(desktop): assign local receipt numbers`.
 
 ## Known follow-up
 - Existing generated receipts may display an ID fallback; after allocation, the history and receipt number should use the local sequence.
