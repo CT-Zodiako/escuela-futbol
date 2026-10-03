@@ -12,7 +12,9 @@ export function UpdatePanel() {
   const [busy, setBusy] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
   const [installed, setInstalled] = useState(false);
-  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(() =>
+    import.meta.env.VITE_APP_VERSION?.replace(/^v/, "") || null,
+  );
   const [message, setMessage] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
 
