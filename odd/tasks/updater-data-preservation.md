@@ -71,6 +71,37 @@ pre-existing students, payments, trainers, outboxes, sync state, the receipt
 counter, and admin/session data all survive `initialize`, while the second-admin
 rejection and session behavior remain correct.
 
+## Root cause and fix note (stale frontend cache, v0.3.5 binary showing v0.3.1 UI)
+
+Confirmed by user screenshot: the Windows executable file properties report
+v0.3.5 while the in-app header still renders v0.3.1 and the updater reports
+"latest". This is not an updater/versioning problem — the packaged frontend
+was current; the visible UI came from stale cached assets.
+
+Cause: `apps/web/vite.config.ts` enabled `vite-plugin-pwa` unconditionally, so
+every desktop build (Tauri `beforeBuildCommand` runs `pnpm --dir ../web build`)
+shipped `sw.js` + Workbox precache into WebView2. A previously registered
+service worker kept serving the old precached HTML/JS after updates, masking
+the new packaged assets.
+
+Fix:
+- `apps/web/vite.config.ts`: the PWA plugin is now disabled during Tauri
+  builds. Tauri injects `TAURI_ENV_PLATFORM` into `beforeBuildCommand`/
+  `beforeDevCommand`; when it is present, `VitePWA({ disable: true })`
+  generates no service worker, workbox, register script, or manifest.
+  Ordinary web dev/build (no Tauri env) keeps the previous PWA behavior.
+  Note: vite-plugin-pwa 0.20.5 names this option `disable` (top level),
+  not `disabled` (that name belongs to the pwaAssets sub-options).
+- `apps/web/src/main.tsx`: on startup inside Tauri (`isDesktop` from
+  `api/desktop.ts`), unregister all service worker registrations and delete
+  all Cache Storage entries (feature-detected, best-effort try/catch). If
+  anything was removed, reload exactly once — guarded by a sessionStorage
+  flag (`escuela-sw-cache-cleared`) so a reload loop is impossible — so the
+  packaged frontend loads fresh assets. Browsers (non-Tauri) are untouched.
+
+Do not touch updater/data or report/student logic; this fix is frontend
+asset-delivery only.
+
 ## Non-destructive Windows update test (pending)
 
 1. Install the current release and record students/payments.
