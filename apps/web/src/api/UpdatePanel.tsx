@@ -22,6 +22,7 @@ export function UpdatePanel() {
     import.meta.env.VITE_APP_VERSION?.replace(/^v/, "") || null,
   );
   const [message, setMessage] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
 
   useEffect(() => {
@@ -45,8 +46,9 @@ export function UpdatePanel() {
       }
       update.current = result;
       setVersion(result?.version ?? null);
-    } catch {
-      // Automatic checks are silent; the manual button shows the error.
+    } catch (probeError) {
+      // Automatic checks are silent, but store the error for the manual check.
+      setError(probeError instanceof Error ? probeError.message : String(probeError ?? "Error desconocido"));
     }
   }
 
@@ -57,6 +59,7 @@ export function UpdatePanel() {
     setBusy(true);
     setVersion(null);
     setProgress(null);
+    setError(null);
     setMessage("Buscando actualizaciones…");
     try {
       await update.current?.close();
@@ -69,7 +72,9 @@ export function UpdatePanel() {
       update.current = result;
       setVersion(result?.version ?? null);
       setMessage(result ? "Hay una actualización disponible." : "Ya tenés la última versión.");
-    } catch {
+    } catch (checkError) {
+      const detail = checkError instanceof Error ? checkError.message : String(checkError ?? "Error desconocido");
+      setError(detail);
       setMessage("No se pudo buscar actualizaciones. Revisá la conexión e intentá de nuevo.");
     } finally {
       locked.current = false;
@@ -155,6 +160,7 @@ export function UpdatePanel() {
         title="Actualizaciones" closeOnClickOutside={!busy} closeOnEscape={!busy} withCloseButton={!busy}>
         <Stack>
           <Text role="status" aria-live="polite">{message}</Text>
+          {error && !busy && <Text size="sm" c="red">Error técnico: {error}</Text>}
           {version && <Text fw={600}>Versión disponible: {version}</Text>}
           {busy && <Progress value={progress ?? 100} animated aria-label="Progreso de actualización" />}
           {version && !installed && <>

@@ -134,3 +134,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release edit $tag --draft=false --latest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Commit latest.json to release branch
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $branch = 'release/v0.3.0-local-only'
+          $source = 'apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/latest.json'
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git fetch origin $branch
+          git checkout $branch
+          Copy-Item $source 'latest.json' -Force
+          git add latest.json
+          git commit -m "chore(updater): update latest.json for $tag" --allow-empty
+          git push origin $branch
