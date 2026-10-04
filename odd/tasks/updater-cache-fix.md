@@ -14,10 +14,10 @@ Fix the in-app updater so it reliably detects new Windows releases instead of mi
 3. Improve error visibility in the update UI so future failures are not silently swallowed.
 
 ## Tasks
-- [ ] Update `tauri.conf.json` updater endpoint to use raw.githubusercontent.com.
-- [ ] Update `.github/workflows/build-windows.yml` to commit `latest.json` to the release branch.
-- [ ] Improve `UpdatePanel.tsx` error reporting for `check()` failures.
-- [ ] Verify local macOS build still compiles.
+- [x] Update `tauri.conf.json` updater endpoint to use raw.githubusercontent.com. (`9ea4927`)
+- [x] Update `.github/workflows/build-windows.yml` to commit `latest.json` to the release branch. (`9ea4927`)
+- [x] Improve `UpdatePanel.tsx` error reporting for `check()` failures. (`9ea4927`)
+- [x] Verify local macOS build still compiles. (`9ea4927`)
 - [ ] Publish v0.3.10 and test that v0.3.9 detects it in-app.
 
 ## Constraints
