@@ -36,6 +36,7 @@ Add a way for operators to create a local backup of the SQLite database and expo
 - [x] Add Excel generation and download in the web frontend. (`55f05cc`)
 - [x] Add UI tab/buttons in ReportsPage. (`55f05cc`)
 - [x] Verify build and close task. (`55f05cc`)
+- [x] Publish signed Windows release v0.3.9. (`v0.3.9`, run `37211610217`)
 
 ## Constraints
 - Preserve local-only architecture.
