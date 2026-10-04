@@ -51,6 +51,7 @@ pub fn run() {
             print_receipt,
             sync::initialize_local,
             sync::backup_local_data,
+            sync::export_database_backup,
             sync::replace_snapshot,
             sync::local_sync_status,
             sync::list_local_trainers,
@@ -75,6 +76,7 @@ pub fn run() {
             sync::local_payment_summary,
             sync::local_pending_report,
             sync::export_local_payments,
+            sync::export_payment_records,
             sync::local_payment_general_report,
             sync::export_local_general_report
         ])

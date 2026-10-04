@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { admin as desktopAdmin, desktop, isDesktop } from "./desktop";
+import { admin as desktopAdmin, desktop, isDesktop, type PaymentRecord } from "./desktop";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
@@ -264,6 +264,73 @@ export const api = {
   getPendingReport: (month: string) =>
     isDesktop ? invokeOrApiError(desktop.pendingReport(month)) :
     request<PendingReport>(`/api/reports/pending?month=${encodeURIComponent(month)}`),
+  exportDatabaseBackup: async (fileName: string): Promise<string> => {
+    if (isDesktop) {
+      return invokeOrApiError(desktop.exportDatabaseBackup(fileName));
+    }
+    throw new ApiError("La copia de seguridad solo está disponible en la aplicación de escritorio.");
+  },
+  exportPaymentRecords: async (): Promise<Blob> => {
+    if (isDesktop) {
+      const records = await invokeOrApiError(desktop.exportPaymentRecords());
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Pagos detallados");
+      worksheet.addRow([
+        "ID del jugador",
+        "Nombre del jugador",
+        "Documento",
+        "Teléfono",
+        "Entrenador",
+        "Estado activo",
+        "Mes de activación",
+        "ID del pago",
+        "Fecha de pago",
+        "Valor pagado",
+        "Método de pago",
+        "Concepto",
+        "Observación",
+        "Número de recibo",
+      ]);
+      worksheet.getRow(1).font = { bold: true };
+      records.forEach((record) => {
+        worksheet.addRow([
+          record.studentId,
+          record.studentName,
+          record.studentDocument,
+          record.studentPhone,
+          record.trainerName,
+          record.studentIsActive ? "Sí" : "No",
+          record.studentActivationMonth,
+          record.paymentId,
+          record.paymentDate,
+          record.paymentAmount,
+          record.paymentMethod,
+          record.paymentConcept,
+          record.paymentNote,
+          record.receiptNumber ?? "",
+        ]);
+      });
+      worksheet.columns = [
+        { width: 20 },
+        { width: 30 },
+        { width: 18 },
+        { width: 14 },
+        { width: 25 },
+        { width: 14 },
+        { width: 18 },
+        { width: 20 },
+        { width: 14 },
+        { width: 14 },
+        { width: 16 },
+        { width: 20 },
+        { width: 25 },
+        { width: 18 },
+      ];
+      const buffer = await workbook.xlsx.writeBuffer();
+      return new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    }
+    throw new ApiError("La exportación detallada de pagos solo está disponible en la aplicación de escritorio.");
+  },
   exportPayments: async (from: string, to: string, trainerId?: string): Promise<Blob> => {
     // Desktop exports locally as CSV (Excel opens it); the server branch stays
     // XLSX for development. The Rust command returns the full CSV text with a

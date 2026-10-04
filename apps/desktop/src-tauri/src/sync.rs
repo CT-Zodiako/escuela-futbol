@@ -145,6 +145,25 @@ pub struct Payment {
     sync_status: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentRecord {
+    student_id: String,
+    student_name: String,
+    student_document: String,
+    student_phone: String,
+    trainer_name: String,
+    student_is_active: bool,
+    student_activation_month: String,
+    payment_id: String,
+    payment_date: String,
+    payment_amount: i64,
+    payment_method: String,
+    payment_concept: String,
+    payment_note: String,
+    receipt_number: Option<i64>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -302,6 +321,21 @@ pub fn backup_local_data(app: tauri::AppHandle) -> Result<()> {
     };
     backup_database(&db_path, &target)
         .map_err(|_| "No se pudo crear la copia de seguridad de los datos. Revisá el espacio en disco e intentá de nuevo.".into())
+}
+
+#[tauri::command]
+pub fn export_database_backup(app: tauri::AppHandle, file_name: String) -> Result<String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let db_path = dir.join(DATABASE_FILE);
+    if !db_path.exists() {
+        return Err("No se encontró la base de datos local.".into());
+    }
+    let download_dir = app.path().download_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&download_dir).map_err(|e| e.to_string())?;
+    let target_path = download_dir.join(file_name);
+    std::fs::copy(&db_path, &target_path).map_err(|e| format!("No se pudo copiar la base de datos: {e}"))?;
+    Ok(target_path.to_string_lossy().to_string())
 }
 
 // Typed payloads preserve receipt/concept fields without exposing SQL to the webview.
@@ -1109,6 +1143,72 @@ pub fn local_pending_report(app: tauri::AppHandle, month: String) -> Result<Pend
 #[tauri::command]
 pub fn export_local_payments(app: tauri::AppHandle, from: String, to: String, trainer_id: Option<String>) -> Result<String> {
     export_payments_local(&open(&app)?, &from, &to, trainer_id.as_deref())
+}
+
+#[tauri::command]
+pub fn export_payment_records(app: tauri::AppHandle) -> Result<Vec<PaymentRecord>> {
+    let conn = open(&app)?;
+    let students = local_students(&conn)?;
+    let trainers = read_trainers(&conn, false)?;
+    let payments = all_visible_payments(&conn)?;
+
+    let trainer_by_id: HashMap<&str, &Trainer> =
+        trainers.iter().map(|t| (t.id.as_str(), t)).collect();
+    let student_by_id: HashMap<&str, &Student> =
+        students.iter().map(|s| (s.id.as_str(), s)).collect();
+
+    let mut records: Vec<PaymentRecord> = Vec::with_capacity(payments.len());
+    for payment in payments {
+        let student = student_by_id.get(payment.student_id.as_str());
+        let trainer_name = student
+            .and_then(|s| s.trainer_id.as_deref())
+            .and_then(|tid| trainer_by_id.get(tid))
+            .map(|t| t.name.clone())
+            .unwrap_or_default();
+
+        let (student_name, student_document, student_phone, student_is_active,
+             student_activation_month) = match student {
+            Some(s) => (
+                s.name.clone(),
+                s.document.clone().unwrap_or_default(),
+                s.phone.clone().unwrap_or_default(),
+                s.is_active,
+                s.activation_month.clone(),
+            ),
+            None => (
+                String::new(),
+                String::new(),
+                String::new(),
+                false,
+                String::new(),
+            ),
+        };
+
+        records.push(PaymentRecord {
+            student_id: payment.student_id,
+            student_name,
+            student_document,
+            student_phone,
+            trainer_name,
+            student_is_active,
+            student_activation_month,
+            payment_id: payment.id,
+            payment_date: payment.payment_date,
+            payment_amount: payment.amount,
+            payment_method: payment.method,
+            payment_concept: payment.concept.unwrap_or_default(),
+            payment_note: payment.note.unwrap_or_default(),
+            receipt_number: payment.receipt_number,
+        });
+    }
+
+    records.sort_by(|a, b| {
+        a.payment_date.cmp(&b.payment_date)
+            .then_with(|| a.student_name.cmp(&b.student_name))
+            .then_with(|| a.payment_id.cmp(&b.payment_id))
+    });
+
+    Ok(records)
 }
 
 #[tauri::command]

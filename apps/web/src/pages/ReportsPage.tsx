@@ -5,7 +5,7 @@ import { notifications } from "@mantine/notifications";
 import { api, ApiError, type GeneralReport, type ReportSummary, type Trainer } from "../api/client";
 import { isDesktop } from "../api/desktop";
 import { toDateOnlyString } from "../date";
-import { IconArrowLeft, IconChartBar, IconFileTypeXls } from "@tabler/icons-react";
+import { IconArrowLeft, IconChartBar, IconDatabaseExport, IconFileTypeXls } from "@tabler/icons-react";
 
 function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("es-CO")}`;
@@ -31,6 +31,8 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
   const [generalReport, setGeneralReport] = useState<GeneralReport | null>(null);
   const [isGeneralLoading, setIsGeneralLoading] = useState(false);
   const [isGeneralExporting, setIsGeneralExporting] = useState(false);
+  const [isBackupLoading, setIsBackupLoading] = useState(false);
+  const [isDetailedExportLoading, setIsDetailedExportLoading] = useState(false);
 
   const [trainers, setTrainers] = useState<Trainer[]>([]);
   const [trainerId, setTrainerId] = useState<string>("");
@@ -103,6 +105,36 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
     }
   }
 
+  async function handleDatabaseBackup() {
+    setIsBackupLoading(true);
+    try {
+      const dateSuffix = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const targetPath = await api.exportDatabaseBackup(`escuela-futbol-backup-${dateSuffix}.sqlite3`);
+      notifications.show({ color: "green", title: "Copia de seguridad lista", message: `Se guardó en: ${targetPath}` });
+    } catch (backupError) {
+      notifications.show({ color: "red", title: "No se pudo crear la copia", message: backupError instanceof ApiError ? backupError.message : "Ocurrió un error inesperado." });
+    } finally {
+      setIsBackupLoading(false);
+    }
+  }
+
+  async function handleDetailedExport() {
+    setIsDetailedExportLoading(true);
+    try {
+      const blob = await api.exportPaymentRecords();
+      const dateSuffix = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `pagos-detallados-${dateSuffix}.xlsx`;
+      document.body.appendChild(link); link.click(); link.remove();
+      URL.revokeObjectURL(link.href);
+    } catch (exportError) {
+      notifications.show({ color: "red", title: "No se pudo exportar", message: exportError instanceof ApiError ? exportError.message : "Ocurrió un error inesperado." });
+    } finally {
+      setIsDetailedExportLoading(false);
+    }
+  }
+
   async function runReport() {
     if (!from || !to) return;
     if (from > to) {
@@ -142,6 +174,7 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
         <Tabs.List>
           <Tabs.Tab value="resumen">Resumen</Tabs.Tab>
           <Tabs.Tab value="general">Informe general</Tabs.Tab>
+          <Tabs.Tab value="backup">Copia de seguridad</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="resumen" pt="xl">
@@ -253,6 +286,45 @@ export function ReportsPage({ onBack }: ReportsPageProps) {
               </Table>
             </Card>
           ) : <Text c="dimmed" mt="lg">Elegí un año y generá el informe.</Text>}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="backup" pt="xl">
+          <Stack gap="lg" align="flex-start">
+            <Card withBorder padding="lg" w="100%" maw={600}>
+              <Stack gap="md">
+                <Text fw={600}>Base de datos</Text>
+                <Text size="sm" c="dimmed">
+                  Descargá el archivo SQLite completo con todos los datos. Podés usarlo como copia de seguridad o abrirlo con herramientas como DB Browser for SQLite.
+                </Text>
+                <Button
+                  color="brandBlue"
+                  leftSection={<IconDatabaseExport size={18} />}
+                  onClick={handleDatabaseBackup}
+                  loading={isBackupLoading}
+                >
+                  Descargar base de datos
+                </Button>
+              </Stack>
+            </Card>
+
+            <Card withBorder padding="lg" w="100%" maw={600}>
+              <Stack gap="md">
+                <Text fw={600}>Pagos detallados</Text>
+                <Text size="sm" c="dimmed">
+                  Exportá un Excel con una fila por cada pago, incluyendo los datos completos del jugador.
+                </Text>
+                <Button
+                  variant="light"
+                  color="brandBlue"
+                  leftSection={<IconFileTypeXls size={18} />}
+                  onClick={handleDetailedExport}
+                  loading={isDetailedExportLoading}
+                >
+                  Exportar pagos detallados
+                </Button>
+              </Stack>
+            </Card>
+          </Stack>
         </Tabs.Panel>
       </Tabs>
     </Stack>

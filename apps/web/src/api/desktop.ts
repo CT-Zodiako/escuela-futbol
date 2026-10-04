@@ -17,11 +17,31 @@ export const admin = {
 // Local-only data access. The desktop SQLite database is the single source of
 // truth: there is no snapshot download, no pending outbox sync, and no
 // last-sync status to surface in the UI.
+export interface PaymentRecord {
+  studentId: string;
+  studentName: string;
+  studentDocument: string;
+  studentPhone: string;
+  trainerName: string;
+  studentIsActive: boolean;
+  studentActivationMonth: string;
+  paymentId: string;
+  paymentDate: string;
+  paymentAmount: number;
+  paymentMethod: string;
+  paymentConcept: string;
+  paymentNote: string;
+  receiptNumber: number | null;
+}
+
 export const desktop = {
   initialize: () => invoke<void>("initialize_local"),
   // Pre-update checkpoint: copies historical.sqlite3 to an external backup
   // directory that the Windows installer never deletes.
   backupLocalData: () => invoke<void>("backup_local_data"),
+  // User-triggered backup: copies the live SQLite file to the Downloads folder.
+  exportDatabaseBackup: (fileName: string) =>
+    invoke<string>("export_database_backup", { fileName }),
   trainers: () => invoke<Trainer[]>("list_local_trainers"),
   enqueueTrainer: (trainer: Trainer) => invoke<Trainer>("enqueue_trainer", { trainer }),
   students: () => invoke<Student[]>("list_local_students"),
@@ -52,4 +72,5 @@ export const desktop = {
     invoke<string>("export_local_general_report", { year, trainerId }),
   exportPayments: (from: string, to: string, trainerId?: string) =>
     invoke<string>("export_local_payments", { from, to, trainerId }),
+  exportPaymentRecords: () => invoke<PaymentRecord[]>("export_payment_records"),
 };
