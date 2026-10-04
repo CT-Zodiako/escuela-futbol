@@ -19,6 +19,9 @@ export const admin = {
 // last-sync status to surface in the UI.
 export const desktop = {
   initialize: () => invoke<void>("initialize_local"),
+  // Pre-update checkpoint: copies historical.sqlite3 to an external backup
+  // directory that the Windows installer never deletes.
+  backupLocalData: () => invoke<void>("backup_local_data"),
   trainers: () => invoke<Trainer[]>("list_local_trainers"),
   enqueueTrainer: (trainer: Trainer) => invoke<Trainer>("enqueue_trainer", { trainer }),
   students: () => invoke<Student[]>("list_local_students"),

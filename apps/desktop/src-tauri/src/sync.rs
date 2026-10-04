@@ -235,9 +235,78 @@ fn apply_one_time_resets(conn: &Connection) -> Result<()> {
 fn open(app: &tauri::AppHandle) -> Result<Connection> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let conn = Connection::open(dir.join("historical.sqlite3")).map_err(|e| e.to_string())?;
+    let db_path = dir.join(DATABASE_FILE);
+    if let Some(target) = backup_dir(&dir) {
+        restore_backup_if_missing(&db_path, &target.join(BACKUP_FILE))?;
+    }
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     initialize(&conn)?;
     Ok(conn)
+}
+
+const DATABASE_FILE: &str = "historical.sqlite3";
+const BACKUP_FILE: &str = "historical.sqlite3.backup";
+
+// The backup lives in a sibling directory of the app-data folder (for example
+// Roaming/<identifier>-backup next to Roaming/<identifier>) so the Windows
+// NSIS installer, which can delete the app-data directory during an update,
+// never touches it. The name derives from the app-data folder so it stays
+// stable across releases.
+fn backup_dir(app_data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let parent = app_data_dir.parent()?;
+    let name = app_data_dir.file_name()?.to_string_lossy();
+    Some(parent.join(format!("{name}-backup")))
+}
+
+// Copy through a temporary file in the destination directory and rename so a
+// crash mid-copy never leaves a truncated backup or database in place.
+fn atomic_copy(src: &std::path::Path, dst_dir: &std::path::Path, dst_name: &str) -> Result<()> {
+    std::fs::create_dir_all(dst_dir).map_err(|e| e.to_string())?;
+    let tmp = dst_dir.join(format!(".{dst_name}.partial"));
+    std::fs::copy(src, &tmp).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, dst_dir.join(dst_name)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// Restore the backup only when the live database is missing. A real database
+// on disk — even an empty file — is never replaced by the backup.
+fn restore_backup_if_missing(db_path: &std::path::Path, backup_path: &std::path::Path) -> Result<()> {
+    if db_path.exists() || !backup_path.exists() {
+        return Ok(());
+    }
+    let Some(parent) = db_path.parent().filter(|parent| !parent.as_os_str().is_empty()) else {
+        return Err("Ruta de datos inválida.".into());
+    };
+    let Some(name) = db_path.file_name().and_then(|name| name.to_str()) else {
+        return Err("Ruta de datos inválida.".into());
+    };
+    atomic_copy(backup_path, parent, name)
+}
+
+// Checkpoint the database (flushing any WAL content into the main file) before
+// the byte-for-byte copy so the backup is internally consistent.
+fn backup_database(db_path: &std::path::Path, backup_dir_path: &std::path::Path) -> Result<()> {
+    if !db_path.exists() {
+        // Nothing to checkpoint; an existing backup already holds the data.
+        return Ok(());
+    }
+    if let Ok(conn) = Connection::open(db_path) {
+        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+        let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+    }
+    atomic_copy(db_path, backup_dir_path, BACKUP_FILE)
+}
+
+#[tauri::command]
+pub fn backup_local_data(app: tauri::AppHandle) -> Result<()> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let db_path = dir.join(DATABASE_FILE);
+    let Some(target) = backup_dir(&dir) else {
+        return Err("No se pudo determinar la carpeta de respaldo.".into());
+    };
+    backup_database(&db_path, &target)
+        .map_err(|_| "No se pudo crear la copia de seguridad de los datos. Revisá el espacio en disco e intentá de nuevo.".into())
 }
 
 // Typed payloads preserve receipt/concept fields without exposing SQL to the webview.
@@ -1900,6 +1969,73 @@ mod tests {
         let generated_at: Option<String> = conn.query_row("SELECT generated_at FROM sync_state WHERE id = 1",
             [], |r| r.get(0)).optional().unwrap();
         assert_eq!(generated_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn external_backup_round_trips_and_restores_only_a_missing_database() {
+        let root = std::env::temp_dir().join(format!("escuela-backup-test-{}", uuid_v4()));
+        let app_dir = root.join("com.escuelafutbol.desktop");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let db_path = app_dir.join("historical.sqlite3");
+        std::fs::write(&db_path, b"database-bytes").unwrap();
+        // The backup directory is a sibling of the app-data directory.
+        let target = backup_dir(&app_dir).unwrap();
+        assert_eq!(target, root.join("com.escuelafutbol.desktop-backup"));
+
+        backup_database(&db_path, &target).unwrap();
+        let backup = target.join("historical.sqlite3.backup");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"database-bytes");
+        // The atomic copy leaves no partial temp file behind.
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 1);
+
+        // A missing database is restored from the backup.
+        std::fs::remove_file(&db_path).unwrap();
+        restore_backup_if_missing(&db_path, &backup).unwrap();
+        assert_eq!(std::fs::read(&db_path).unwrap(), b"database-bytes");
+
+        // A live database is never overwritten by the backup.
+        std::fs::write(&db_path, b"newer-data").unwrap();
+        restore_backup_if_missing(&db_path, &backup).unwrap();
+        assert_eq!(std::fs::read(&db_path).unwrap(), b"newer-data");
+        // Even an empty-but-existing database file is left untouched.
+        std::fs::write(&db_path, b"").unwrap();
+        restore_backup_if_missing(&db_path, &backup).unwrap();
+        assert_eq!(std::fs::read(&db_path).unwrap(), b"");
+
+        // No backup on disk is a no-op, not an error.
+        std::fs::remove_file(&db_path).unwrap();
+        std::fs::remove_file(&backup).unwrap();
+        restore_backup_if_missing(&db_path, &backup).unwrap();
+        assert!(!db_path.exists());
+        // Backing up with no database does not fail nor erase an existing backup.
+        std::fs::write(&backup, b"kept").unwrap();
+        backup_database(&db_path, &target).unwrap();
+        assert_eq!(std::fs::read(&backup).unwrap(), b"kept");
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn backup_restore_preserves_a_real_sqlite_database() {
+        let root = std::env::temp_dir().join(format!("escuela-backup-sqlite-{}", uuid_v4()));
+        let app_dir = root.join("app-data");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let db_path = app_dir.join("historical.sqlite3");
+        {
+            let mut conn = Connection::open(&db_path).unwrap();
+            initialize(&conn).unwrap();
+            enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        }
+        let target = backup_dir(&app_dir).unwrap();
+        backup_database(&db_path, &target).unwrap();
+        let backup = target.join("historical.sqlite3.backup");
+        // The restored copy opens cleanly and keeps the stored rows.
+        std::fs::remove_file(&db_path).unwrap();
+        restore_backup_if_missing(&db_path, &backup).unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        initialize(&conn).unwrap();
+        assert_eq!(read_trainers(&conn, false).unwrap().len(), 1);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     fn new_admin() -> NewAdmin {

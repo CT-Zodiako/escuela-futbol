@@ -15,6 +15,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             print_receipt,
             sync::initialize_local,
+            sync::backup_local_data,
             sync::replace_snapshot,
             sync::local_sync_status,
             sync::list_local_trainers,
