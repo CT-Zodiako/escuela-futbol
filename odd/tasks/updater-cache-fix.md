@@ -18,7 +18,9 @@ Fix the in-app updater so it reliably detects new Windows releases instead of mi
 - [x] Update `.github/workflows/build-windows.yml` to commit `latest.json` to the release branch. (`9ea4927`)
 - [x] Improve `UpdatePanel.tsx` error reporting for `check()` failures. (`9ea4927`)
 - [x] Verify local macOS build still compiles. (`9ea4927`)
-- [ ] Publish v0.3.10 and test that v0.3.9 detects it in-app.
+- [x] Fix workflow checkout conflict when committing latest.json to release branch. (`1bb9a6d`)
+- [x] Publish v0.3.10 and update latest.json on release branch. (`v0.3.10`, run `37213419185`)
+- [ ] Test that v0.3.10 detects the next in-app update (will require v0.3.11 or later).
 
 ## Constraints
 - Preserve local data and existing update flow.
