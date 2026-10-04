@@ -163,9 +163,12 @@ pub struct SyncStatus {
 
 type Result<T> = std::result::Result<T, String>;
 
-/// One-time marker for the v0.2.3 release. Sync failed on some machines, so the
-/// first launch of 0.2.3 wipes local-only data once so those PCs start clean.
-/// Remote/API data and the administrator (never stored locally) are untouched.
+/// Legacy marker for the v0.2.3 release. The original 0.2.3 launch wiped
+/// local-only data once because sync failed on some machines; that destructive
+/// reset is the confirmed cause of data loss during updates. The marker is now
+/// only a legacy acknowledgement: initialize inserts it once and preserves
+/// every existing table and row. The name is kept for compatibility with
+/// databases that already carry it.
 const RESET_0_2_3_MARKER: &str = "reset-local-data-v0.2.3";
 
 fn initialize(conn: &Connection) -> Result<()> {
@@ -205,31 +208,23 @@ fn initialize(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS receipt_counter (
             id INTEGER PRIMARY KEY CHECK(id = 1), next_number INTEGER NOT NULL);")
         .map_err(|e| e.to_string())?;
-    // The counter row is created once and never reset: reinitialization and the
-    // one-time data resets below must not reuse already-issued receipt numbers.
+    // The counter row is created once and never reset: reinitialization must
+    // not reuse already-issued receipt numbers.
     conn.execute("INSERT OR IGNORE INTO receipt_counter(id, next_number) VALUES (1, 1)", [])
         .map_err(|e| e.to_string())?;
-    apply_one_time_resets(conn)
+    acknowledge_legacy_reset_marker(conn)
 }
 
-// Clears local-only tables exactly once per marker. Administrators and their
-// sessions are never wiped: admins are local-only now, so the reset must not
-// lock the owner out. Schema and markers persist across launches.
-fn apply_one_time_resets(conn: &Connection) -> Result<()> {
-    let applied: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM migration_markers WHERE id = ?1)",
-        [RESET_0_2_3_MARKER], |row| row.get(0)).map_err(|e| e.to_string())?;
-    if applied { return Ok(()); }
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    tx.execute_batch("DELETE FROM payments;
-        DELETE FROM students;
-        DELETE FROM trainers;
-        DELETE FROM trainer_outbox;
-        DELETE FROM payment_outbox;
-        DELETE FROM student_outbox;
-        DELETE FROM sync_state;").map_err(|e| e.to_string())?;
-    tx.execute("INSERT INTO migration_markers(id, applied_at) VALUES (?1, datetime('now'))",
+// Records the legacy v0.2.3 acknowledgement marker exactly once. The original
+// implementation wiped payments, students, trainers, outboxes, and sync state
+// when the marker was missing — the confirmed cause of data loss during
+// updates — so it now only inserts the marker and preserves all local data.
+// Administrators and their sessions are never touched. Schema and markers
+// persist across launches.
+fn acknowledge_legacy_reset_marker(conn: &Connection) -> Result<()> {
+    conn.execute("INSERT OR IGNORE INTO migration_markers(id, applied_at) VALUES (?1, datetime('now'))",
         [RESET_0_2_3_MARKER]).map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())
+    Ok(())
 }
 
 fn open(app: &tauri::AppHandle) -> Result<Connection> {
@@ -1927,7 +1922,7 @@ mod tests {
     }
 
     #[test]
-    fn release_0_2_3_reset_clears_seeded_local_data_once() {
+    fn release_0_2_3_marker_preserves_seeded_local_data() {
         let mut conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
         // Simulate a pre-0.2.3 database: data from the old build, no marker yet.
@@ -1938,18 +1933,23 @@ mod tests {
         enqueue(&conn, local_payment()).unwrap();
         assert!(count_rows(&conn, "payments") > 0);
         assert!(count_rows(&conn, "student_outbox") > 0);
+        // The legacy reset is gone: initialize only acknowledges the marker
+        // and every pre-existing row survives.
         initialize(&conn).unwrap();
-        assert_eq!(count_rows(&conn, "payments"), 0);
-        assert_eq!(count_rows(&conn, "students"), 0);
-        assert_eq!(count_rows(&conn, "trainers"), 0);
-        assert_eq!(count_rows(&conn, "trainer_outbox"), 0);
-        assert_eq!(count_rows(&conn, "student_outbox"), 0);
-        assert_eq!(count_rows(&conn, "payment_outbox"), 0);
-        assert_eq!(count_rows(&conn, "sync_state"), 0);
+        assert_eq!(count_rows(&conn, "payments"), 1);
+        assert_eq!(count_rows(&conn, "students"), 2);
+        assert_eq!(count_rows(&conn, "trainers"), 1);
+        assert_eq!(count_rows(&conn, "trainer_outbox"), 1);
+        assert_eq!(count_rows(&conn, "student_outbox"), 1);
+        assert_eq!(count_rows(&conn, "payment_outbox"), 1);
+        assert_eq!(count_rows(&conn, "sync_state"), 1);
         assert_eq!(count_rows(&conn, "migration_markers"), 1);
-        // Schema survives the reset so new data can be created immediately.
+        // Schema and acknowledged marker persist, so new data can be created
+        // immediately and initialize stays idempotent.
+        initialize(&conn).unwrap();
         enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
         assert_eq!(count_rows(&conn, "trainer_outbox"), 1);
+        assert_eq!(count_rows(&conn, "payments"), 1);
     }
 
     #[test]
@@ -2423,15 +2423,37 @@ mod tests {
     }
 
     #[test]
-    fn second_admin_is_rejected_and_admin_survives_the_one_time_reset() {
+    fn second_admin_is_rejected_and_local_data_survives_initialize() {
         let mut conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
         let session = create_first_admin_local(&mut conn, new_admin()).unwrap();
         // Re-simulate a pre-0.2.3 database: data exists, marker not applied yet.
         conn.execute("DELETE FROM migration_markers", []).unwrap();
         replace(&mut conn, local_snapshot()).unwrap();
-        initialize(&conn).unwrap(); // reset fires here
-        assert_eq!(count_rows(&conn, "payments"), 0);
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+        enqueue_student_local(&mut conn, offline_student()).unwrap();
+        enqueue(&conn, local_payment()).unwrap();
+        // The legacy reset must never run again: initialize only acknowledges
+        // the marker and preserves every table and row.
+        initialize(&conn).unwrap();
+        assert_eq!(count_rows(&conn, "payments"), 1);
+        assert_eq!(count_rows(&conn, "students"), 2);
+        assert_eq!(count_rows(&conn, "trainers"), 1);
+        assert_eq!(count_rows(&conn, "trainer_outbox"), 1);
+        assert_eq!(count_rows(&conn, "student_outbox"), 1);
+        assert_eq!(count_rows(&conn, "payment_outbox"), 1);
+        assert_eq!(count_rows(&conn, "sync_state"), 1);
+        assert_eq!(count_rows(&conn, "migration_markers"), 1);
+        // The receipt counter is never rolled back either: the snapshot's
+        // receipt 42 seeds it at 43 and the local payment consumed one more.
+        let next: i64 = conn.query_row("SELECT next_number FROM receipt_counter WHERE id = 1", [],
+            |row| row.get(0)).unwrap();
+        assert_eq!(next, 44);
+        // A second initialize stays non-destructive and idempotent.
+        initialize(&conn).unwrap();
+        assert_eq!(count_rows(&conn, "migration_markers"), 1);
+        assert_eq!(count_rows(&conn, "students"), 2);
+        assert_eq!(count_rows(&conn, "payment_outbox"), 1);
         assert_eq!(count_rows(&conn, "admins"), 1);
         assert_eq!(count_rows(&conn, "admin_sessions"), 1);
         login_local(&conn, "admin@escuela.local", "clave-segura-1").unwrap();

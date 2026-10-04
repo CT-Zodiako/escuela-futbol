@@ -53,6 +53,24 @@ fix prioritizes data preservation.
   no partial temp files, restore-only-when-missing, never-overwrite-live-data,
   and a real SQLite database surviving backup + restore.
 
+## Root cause and fix note (2026-02, data loss during updates)
+
+The confirmed cause of user data loss during updates was not the installer
+itself but a destructive legacy migration in `apps/desktop/src-tauri/src/sync.rs`:
+the v0.2.3 "one-time reset" (`apply_one_time_resets`) deleted payments,
+students, trainers, all outboxes, and sync state whenever the migration marker
+`reset-local-data-v0.2.3` was absent from `migration_markers`. Any update path
+that handed the app a database without that marker — including the Windows
+update flow — silently wiped local data on first launch.
+
+Fix: the reset is replaced by `acknowledge_legacy_reset_marker`. When the
+marker is absent it now only inserts the marker (name kept for compatibility)
+and preserves every existing table and row. The focused test
+`second_admin_is_rejected_and_local_data_survives_initialize` asserts that
+pre-existing students, payments, trainers, outboxes, sync state, the receipt
+counter, and admin/session data all survive `initialize`, while the second-admin
+rejection and session behavior remain correct.
+
 ## Non-destructive Windows update test (pending)
 
 1. Install the current release and record students/payments.
