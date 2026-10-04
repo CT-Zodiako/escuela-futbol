@@ -147,7 +147,9 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git fetch origin $branch
-          git checkout $branch
+          # Discard local workflow edits (e.g. version-injected tauri.conf.json)
+          # before switching to the release branch; only latest.json will be committed.
+          git checkout -f $branch
           Copy-Item $source 'latest.json' -Force
           git add latest.json
           git commit -m "chore(updater): update latest.json for $tag" --allow-empty
