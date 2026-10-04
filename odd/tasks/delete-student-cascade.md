@@ -31,6 +31,7 @@ Allow operators to permanently delete a student and all of their payment records
 - Web build: `pnpm build:web` succeeded.
 - Desktop build: `pnpm build:desktop` succeeded (macOS bundle).
 - Release: published via tag `v0.3.11` and GitHub Actions workflow.
+- Commit: `1b91d70`
 
 ## Constraints
 - Desktop-only; no web/API changes.
