@@ -1131,6 +1131,27 @@ pub fn set_local_student_status(app: tauri::AppHandle, id: String, is_active: bo
 }
 
 #[tauri::command]
+pub fn delete_local_student(app: tauri::AppHandle, id: String) -> Result<()> {
+    let conn = open(&app)?;
+    if !valid_uuid(&id) {
+        return Err("El identificador del jugador no es válido.".into());
+    }
+    // Cascade delete: remove pending/outbox records first, then payments, then the student.
+    conn.execute("DELETE FROM payment_outbox WHERE student_id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM payments WHERE student_id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM student_outbox WHERE json_extract(payload, '$.id') = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+    let deleted = conn.execute("DELETE FROM students WHERE id = ?1", [&id])
+        .map_err(|e| e.to_string())?;
+    if deleted == 0 {
+        return Err("Jugador no encontrado.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn local_payment_summary(app: tauri::AppHandle, from: String, to: String, trainer_id: Option<String>) -> Result<PaymentSummaryReport> {
     summary_report_local(&open(&app)?, &from, &to, trainer_id.as_deref())
 }
@@ -2596,5 +2617,97 @@ mod tests {
             [session.token.clone()], |r| r.get(0)).unwrap();
         assert_eq!(token_rows, 0);
         assert!(valid_uuid(&uuid_v4()));
+    }
+
+    #[test]
+    fn delete_student_removes_student_and_all_related_payments() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+
+        let student_id = STUDENT_ID;
+        let student = Student {
+            id: student_id.into(),
+            client_mutation_id: Some(student_id.into()),
+            trainer_id: Some(SERVER_ID.into()),
+            name: "Jugador a borrar".into(),
+            document: Some("1030456789".into()),
+            phone: Some("3001234567".into()),
+            is_active: true,
+            activation_month: "2026-02".into(),
+            sync_status: None,
+        };
+        enqueue_student_local(&mut conn, student).unwrap();
+        enqueue(&conn, local_payment()).unwrap();
+
+        let mut second_payment = local_payment();
+        second_payment.id = "c3f1a2c4-1111-4b2b-9c3d-1234567890ac".into();
+        second_payment.client_mutation_id = Some(second_payment.id.clone());
+        second_payment.payment_date = "2026-03-01".into();
+        enqueue(&conn, second_payment).unwrap();
+
+        assert_eq!(local_students(&conn).unwrap().len(), 1);
+        assert_eq!(all_visible_payments(&conn).unwrap().len(), 2);
+
+        conn.execute("DELETE FROM payment_outbox WHERE student_id = ?1", [student_id])
+            .unwrap();
+        conn.execute("DELETE FROM payments WHERE student_id = ?1", [student_id])
+            .unwrap();
+        conn.execute("DELETE FROM student_outbox WHERE json_extract(payload, '$.id') = ?1", [student_id])
+            .unwrap();
+        let deleted = conn.execute("DELETE FROM students WHERE id = ?1", [student_id])
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        assert!(local_students(&conn).unwrap().is_empty());
+        assert!(all_visible_payments(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_student_leaves_other_students_and_payments_intact() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        enqueue_trainer_local(&mut conn, offline_trainer()).unwrap();
+
+        let student_id = STUDENT_ID;
+        let student = Student {
+            id: student_id.into(),
+            client_mutation_id: Some(student_id.into()),
+            trainer_id: Some(SERVER_ID.into()),
+            name: "Jugador a borrar".into(),
+            document: Some("1030456789".into()),
+            phone: Some("3001234567".into()),
+            is_active: true,
+            activation_month: "2026-02".into(),
+            sync_status: None,
+        };
+        enqueue_student_local(&mut conn, student).unwrap();
+        enqueue(&conn, local_payment()).unwrap();
+
+        let other_id = "a1b2c3d4-1111-2222-3333-444444444444";
+        let other_student = Student {
+            id: other_id.into(),
+            client_mutation_id: Some(other_id.into()),
+            trainer_id: Some(SERVER_ID.into()),
+            name: "Otro".into(),
+            document: Some("1234567891".into()),
+            phone: Some("3001234568".into()),
+            is_active: true,
+            activation_month: "2026-02".into(),
+            sync_status: None,
+        };
+        enqueue_student_local(&mut conn, other_student).unwrap();
+
+        conn.execute("DELETE FROM payment_outbox WHERE student_id = ?1", [student_id])
+            .unwrap();
+        conn.execute("DELETE FROM payments WHERE student_id = ?1", [student_id])
+            .unwrap();
+        conn.execute("DELETE FROM student_outbox WHERE json_extract(payload, '$.id') = ?1", [student_id])
+            .unwrap();
+        conn.execute("DELETE FROM students WHERE id = ?1", [student_id]).unwrap();
+
+        assert_eq!(local_students(&conn).unwrap().len(), 1);
+        assert_eq!(local_students(&conn).unwrap()[0].id, other_id);
+        assert!(all_visible_payments(&conn).unwrap().is_empty());
     }
 }

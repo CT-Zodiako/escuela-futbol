@@ -261,6 +261,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ isActive }),
     }),
+  deleteStudent: (id: string) =>
+    isDesktop ? invokeOrApiError(desktop.deleteStudent(id)) :
+    request<void>(`/api/students/${encodeURIComponent(id)}`, { method: "DELETE" }),
   getPendingReport: (month: string) =>
     isDesktop ? invokeOrApiError(desktop.pendingReport(month)) :
     request<PendingReport>(`/api/reports/pending?month=${encodeURIComponent(month)}`),

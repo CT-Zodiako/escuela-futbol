@@ -73,6 +73,7 @@ pub fn run() {
             sync::update_local_payment,
             sync::update_local_student,
             sync::set_local_student_status,
+            sync::delete_local_student,
             sync::local_payment_summary,
             sync::local_pending_report,
             sync::export_local_payments,

@@ -30,6 +30,7 @@ import {
   IconUserPlus,
   IconCash,
   IconPencil,
+  IconTrash,
 } from "@tabler/icons-react";
 import { api, ApiError, type Student, type Trainer } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -163,6 +164,35 @@ export function DashboardPage() {
       notifications.show({
         color: "red",
         title: "No se pudo actualizar el estado",
+        message:
+          error instanceof ApiError
+            ? error.message
+            : "Ocurrió un error inesperado.",
+        autoClose: 5000,
+        withCloseButton: true,
+      });
+    }
+  }
+
+  async function handleDeleteStudent(student: Student) {
+    const confirmed = window.confirm(
+      `¿Eliminar a ${student.name}? Esta acción no se puede deshacer y se borrarán todos sus pagos.`,
+    );
+    if (!confirmed) return;
+    try {
+      await api.deleteStudent(student.id);
+      setStudents((prev) => prev.filter((s) => s.id !== student.id));
+      notifications.show({
+        color: "green",
+        title: "Jugador eliminado",
+        message: `${student.name} y todos sus pagos fueron eliminados.`,
+        autoClose: 5000,
+        withCloseButton: true,
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        title: "No se pudo eliminar",
         message:
           error instanceof ApiError
             ? error.message
@@ -351,6 +381,15 @@ export function DashboardPage() {
                         </Button>
                         <Button
                           variant="light"
+                          color="red"
+                          leftSection={<IconTrash size={16} />}
+                          fullWidth
+                          onClick={() => handleDeleteStudent(student)}
+                        >
+                          Eliminar
+                        </Button>
+                        <Button
+                          variant="light"
                           color={student.isActive ? "red" : "green"}
                           leftSection={
                             student.isActive ? (
@@ -379,6 +418,7 @@ export function DashboardPage() {
                     <Table.Th>Teléfono</Table.Th>
                     <Table.Th>Entrenador</Table.Th>
                     <Table.Th>Estado</Table.Th>
+                    <Table.Th></Table.Th>
                     <Table.Th></Table.Th>
                     <Table.Th></Table.Th>
                     <Table.Th></Table.Th>
@@ -425,6 +465,16 @@ export function DashboardPage() {
                           onClick={() => setEditingStudent(student)}
                         >
                           Editar
+                        </Button>
+                      </Table.Td>
+                      <Table.Td>
+                        <Button
+                          variant="light"
+                          color="red"
+                          leftSection={<IconTrash size={16} />}
+                          onClick={() => handleDeleteStudent(student)}
+                        >
+                          Eliminar
                         </Button>
                       </Table.Td>
                       <Table.Td>

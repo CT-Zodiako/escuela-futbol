@@ -57,6 +57,7 @@ export const desktop = {
   }) => invoke<Payment>("update_local_payment", { id, update }),
   setStudentStatus: (id: string, isActive: boolean) =>
     invoke<Student>("set_local_student_status", { id, isActive }),
+  deleteStudent: (id: string) => invoke<void>("delete_local_student", { id }),
   updateStudent: (id: string, update: {
     trainerId: string;
     name: string;
