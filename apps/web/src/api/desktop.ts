@@ -19,6 +19,9 @@ export const admin = {
 // last-sync status to surface in the UI.
 export const desktop = {
   initialize: () => invoke<void>("initialize_local"),
+  // Pre-update checkpoint: copies historical.sqlite3 to an external backup
+  // directory that the Windows installer never deletes.
+  backupLocalData: () => invoke<void>("backup_local_data"),
   trainers: () => invoke<Trainer[]>("list_local_trainers"),
   enqueueTrainer: (trainer: Trainer) => invoke<Trainer>("enqueue_trainer", { trainer }),
   students: () => invoke<Student[]>("list_local_students"),
@@ -34,6 +37,12 @@ export const desktop = {
   }) => invoke<Payment>("update_local_payment", { id, update }),
   setStudentStatus: (id: string, isActive: boolean) =>
     invoke<Student>("set_local_student_status", { id, isActive }),
+  updateStudent: (id: string, update: {
+    trainerId: string;
+    name: string;
+    document: string;
+    phone: string;
+  }) => invoke<Student>("update_local_student", { id, update }),
   paymentSummary: (from: string, to: string, trainerId?: string) =>
     invoke<ReportSummary>("local_payment_summary", { from, to, trainerId }),
   pendingReport: (month: string) => invoke<PendingReport>("local_pending_report", { month }),

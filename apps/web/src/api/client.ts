@@ -246,6 +246,15 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+  updateStudent: (
+    id: string,
+    data: { trainerId: string; name: string; document: string; phone: string },
+  ) =>
+    isDesktop ? invokeOrApiError(desktop.updateStudent(id, data)) :
+    request<Student>(`/api/students/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
   setStudentStatus: (id: string, isActive: boolean) =>
     isDesktop ? invokeOrApiError(desktop.setStudentStatus(id, isActive)) :
     request<Student>(`/api/students/${encodeURIComponent(id)}/status`, {
