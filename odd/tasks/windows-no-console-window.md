@@ -4,10 +4,10 @@
 Prevent the Windows desktop executable from opening a terminal/console window alongside the main GUI window on every launch.
 
 ## Tasks
-- [ ] Add the Windows subsystem directive so the binary is a GUI app only.
-- [ ] Verify the local macOS build still compiles (directive is Windows-only).
-- [ ] Commit the fix and record the commit identity.
-- [ ] Publish a signed Windows release so the production machine stops seeing the extra console window.
+- [x] Add the Windows subsystem directive so the binary is a GUI app only.
+- [x] Verify the local macOS build still compiles (directive is Windows-only).
+- [x] Commit the fix and record the commit identity. (`54d56c4`)
+- [x] Publish a signed Windows release so the production machine stops seeing the extra console window. (v0.3.8, run 37208866623)
 
 ## Constraints
 - Keep macOS/Linux builds unaffected.
