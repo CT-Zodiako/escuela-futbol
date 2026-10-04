@@ -1,0 +1,11 @@
+{
+  "pub_date": "2026-10-04T15:12:15Z",
+  "version": "0.3.9",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRKzZDTTlMQUFIQ1gxejVkR1NXQmU5RkphK1g5eUVHN0xhVUZDWEx0OGN6N0NmMVp6RXJzd3gvekw4Y1BkS0VJeXhMUW5ZbEU2NThBV2tpYnhsV09OU0FIKzhreDh6d2drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMTI2NzMyCWZpbGU6RXNjdWVsYSBGdXRib2xfMC4zLjlfeDY0LXNldHVwLm5zaXMuemlwCXZlcnNpb246MC4zLjkKUHI3N1VJd3QzcHhHSEhVQm1hU1JIaGZJQm5LaUtZSzhtdVhpNE5YdEUrTk5WcnpmdUZTbldnWVJQOUt2bmtwRXJ3MHViVDBEV3dtdWo1UW9WNXdlQnc9PQo=",
+      "url": "https://github.com/CT-Zodiako/escuela-futbol/releases/download/v0.3.9/Escuela.Futbol_0.3.9_x64-setup.nsis.zip"
+    }
+  },
+  "notes": "Escuela Futbol v0.3.9"
+}
