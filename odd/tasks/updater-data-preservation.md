@@ -102,6 +102,32 @@ Fix:
 Do not touch updater/data or report/student logic; this fix is frontend
 asset-delivery only.
 
+## Root cause and fix note (stale frontend cache persists, v0.3.6 binary showing v0.3.1 UI)
+
+Confirmed by user screenshot: the installed Windows exe reports v0.3.6 while
+the in-app header still renders v0.3.1. The v0.3.5 fix removed the service
+worker from *new* builds, but machines that already registered the old
+service worker were not healed: the previous `main.tsx` cleanup runs in the
+renderer, i.e. *after* the webview has already loaded — and the old service
+worker intercepts that first load and serves the old precached HTML/JS
+before any cleanup can execute.
+
+Fix (native layer, `apps/desktop/src-tauri/src/lib.rs`):
+- `run()` now installs a Tauri `.setup()` hook, which runs before the main
+  webview loads. It calls `clear_stale_frontend_cache_once()`, which uses
+  the main `WebviewWindow` and `clear_all_browsing_data()` exactly once to
+  wipe the stale service worker/cache held by WebView2.
+- The clear is guarded by a marker file, `frontend-cache-cleared-v0.3.7`,
+  written under `app.path().app_data_dir()` (created on demand), so WebView
+  storage is not wiped on every launch. The SQLite database files live in
+  the same directory and are never touched or deleted.
+- If the main webview window is unavailable, setup fails with a clear error
+  instead of silently skipping the migration or inventing another path.
+
+The frontend `main.tsx` cleanup is kept as defense in depth for browsers and
+edge cases; the native clear is the authoritative fix for installed desktop
+releases that shipped the stale PWA cache.
+
 ## Non-destructive Windows update test (pending)
 
 1. Install the current release and record students/payments.
