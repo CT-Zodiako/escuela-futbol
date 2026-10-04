@@ -26,6 +26,7 @@ Attempt per-version reviews, but abandon if the review lifecycle is unstable.
 - The review state did not persist across `gentle_review status` calls (kept returning `fresh_target_ready`), so the approach was abandoned.
 - The user explicitly decided to leave the historical v0.3.x delta unreviewed and proceed with testing the v0.3.8 Windows update.
 - Temporary worktree was removed.
+- Decision recorded in commit `ed91c4a`.
 
 ## Constraints
 - Do not rewrite published tags or release history.

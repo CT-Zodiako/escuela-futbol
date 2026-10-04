@@ -31,11 +31,11 @@ Add a way for operators to create a local backup of the SQLite database and expo
 - Do not upload anything to a server.
 
 ## Tasks
-- [ ] Add Tauri command to copy the SQLite database to a default Downloads path.
-- [ ] Add Tauri command to return all payment records enriched with student/trainer data.
-- [ ] Add Excel generation and download in the web frontend.
-- [ ] Add UI tab/buttons in ReportsPage.
-- [ ] Verify build and close task.
+- [x] Add Tauri command to copy the SQLite database to a default Downloads path. (`55f05cc`)
+- [x] Add Tauri command to return all payment records enriched with student/trainer data. (`55f05cc`)
+- [x] Add Excel generation and download in the web frontend. (`55f05cc`)
+- [x] Add UI tab/buttons in ReportsPage. (`55f05cc`)
+- [x] Verify build and close task. (`55f05cc`)
 
 ## Constraints
 - Preserve local-only architecture.
